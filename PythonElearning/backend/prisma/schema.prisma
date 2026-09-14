@@ -1,0 +1,332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+//   url      = env("DATABASE_URL")
+}
+
+model AIGenerations {
+  GenerationID     Int              @id(map: "PK__AIGenera__AFCC8ABA495BCD59") @default(autoincrement())
+  ContextID        Int
+  Provider         String?          @db.NVarChar(50)
+  ModelName        String?          @db.NVarChar(100)
+  PromptText       String?          @db.NVarChar(Max)
+  PromptTokens     Int?
+  CompletionTokens Int?
+  RawAIResponse    String?          @db.NVarChar(Max)
+  ProcessingTimeMs Int?
+  Status           String?          @db.NVarChar(50)
+  ErrorMessage     String?          @db.NVarChar(Max)
+  GeneratedAt      DateTime         @default(dbgenerated("sysdatetime()"), map: "DF__AIGenerat__Gener__18EBB532")
+  LearningContexts LearningContexts @relation(fields: [ContextID], references: [ContextID], onUpdate: NoAction, map: "FK_AIGenerations_Context")
+  LearningPaths    LearningPaths[]
+}
+
+model Answers {
+  AnswerID      Int           @id(map: "PK__Answers__D4825024A3D3EFF0") @default(autoincrement())
+  QuestionID    Int
+  Content       String        @db.NVarChar(Max)
+  IsCorrect     Boolean       @default(false, map: "DF__Answers__IsCorre__6754599E")
+  TestQuestions TestQuestions @relation(fields: [QuestionID], references: [QuestionID], onUpdate: NoAction, map: "FK_Answers_Question")
+  Submissions   Submissions[]
+}
+
+model Categories {
+  CategoryID   Int       @id(map: "PK__Categori__19093A2B6D0DA282") @default(autoincrement())
+  CategoryName String    @db.NVarChar(100)
+  Description  String?   @db.NVarChar(Max)
+  Courses      Courses[]
+}
+
+model Chapters {
+  ChapterID  Int       @id(map: "PK__Chapters__0893A34AE6A80156") @default(autoincrement())
+  CourseID   Int
+  Title      String    @db.NVarChar(200)
+  OrderIndex Int
+  Courses    Courses   @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_Chapters_Courses")
+  Lessons    Lessons[]
+}
+
+model Courses {
+  CourseID             Int                    @id(map: "PK__Courses__C92D7187CE29EB78") @default(autoincrement())
+  InstructorID         Int
+  CategoryID           Int
+  Title                String                 @db.NVarChar(200)
+  Description          String?                @db.NVarChar(Max)
+  Status               String                 @default("Draft", map: "DF__Courses__Status__4222D4EF") @db.NVarChar(50)
+  CreatedAt            DateTime               @default(dbgenerated("sysdatetime()"), map: "DF__Courses__Created__4316F928")
+  Chapters             Chapters[]
+  Categories           Categories             @relation(fields: [CategoryID], references: [CategoryID], onUpdate: NoAction, map: "FK_Courses_Category")
+  Users                Users                  @relation(fields: [InstructorID], references: [UserID], onUpdate: NoAction, map: "FK_Courses_Instructor")
+  Enrollments          Enrollments[]
+  KnowledgeTopics      KnowledgeTopics[]
+  LearningActivities   LearningActivities[]
+  LearningPaths        LearningPaths[]
+  LearningProfiles     LearningProfiles[]
+  StudentLearningStats StudentLearningStats[]
+}
+
+model Enrollments {
+  EnrollmentID    Int      @id(map: "PK__Enrollme__7F6877FB5757DD3A") @default(autoincrement())
+  UserID          Int
+  CourseID        Int
+  EnrolledAt      DateTime @default(dbgenerated("sysdatetime()"), map: "DF__Enrollmen__Enrol__4E88ABD4")
+  ProgressPercent Decimal  @default(0.00, map: "DF__Enrollmen__Progr__4F7CD00D") @db.Decimal(5, 2)
+  Courses         Courses  @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_Enrollments_Course")
+  Users           Users    @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_Enrollments_User")
+
+  @@unique([UserID, CourseID], map: "UQ_Enrollments_User_Course")
+}
+
+model Exercises {
+  ExerciseID         Int                  @id(map: "PK__Exercise__A074AD0F12A8D8AF") @default(autoincrement())
+  LessonID           Int?
+  TopicID            Int?
+  Title              String               @db.NVarChar(200)
+  Type               String?              @db.NVarChar(50)
+  TimeLimitMinutes   Int                  @default(0, map: "DF__Exercises__TimeL__5BE2A6F2")
+  DifficultyLevel    Int                  @default(1, map: "DF__Exercises__Diffi__5CD6CB2B")
+  MaxScore           Decimal              @default(10.00, map: "DF__Exercises__MaxSc__5DCAEF64") @db.Decimal(5, 2)
+  Lessons            Lessons?             @relation(fields: [LessonID], references: [LessonID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Exercises_Lesson")
+  KnowledgeTopics    KnowledgeTopics?     @relation(fields: [TopicID], references: [TopicID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Exercises_Topic")
+  LearningActivities LearningActivities[]
+  LearningPathItems  LearningPathItems[]
+  TestAttempts       TestAttempts[]
+  TestQuestions      TestQuestions[]
+}
+
+model KnowledgeTopics {
+  TopicID              Int                    @id(map: "PK__Knowledg__022E0F7DF9F2F944") @default(autoincrement())
+  CourseID             Int
+  TopicName            String                 @db.NVarChar(150)
+  Description          String?                @db.NVarChar(Max)
+  Exercises            Exercises[]
+  Courses              Courses                @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_KnowledgeTopics_Course")
+  LearningPathItems    LearningPathItems[]
+  LessonTopics         LessonTopics[]
+  StudentTopicProgress StudentTopicProgress[]
+  TestQuestions        TestQuestions[]
+
+  @@unique([CourseID, TopicName], map: "UQ_KnowledgeTopics_Course_Topic")
+}
+
+model LearningActivities {
+  ActivityID       BigInt     @id(map: "PK__Learning__45F4A7F1C89DF45E") @default(autoincrement())
+  UserID           Int
+  CourseID         Int
+  LessonID         Int?
+  ExerciseID       Int?
+  ActionType       String?    @db.NVarChar(50)
+  TimeSpentSeconds Int        @default(0, map: "DF__LearningA__TimeS__76969D2E")
+  Score            Decimal?   @db.Decimal(5, 2)
+  IsCompleted      Boolean?
+  CreatedAt        DateTime   @default(dbgenerated("sysdatetime()"), map: "DF__LearningA__Creat__778AC167")
+  Courses          Courses    @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_LearningActivities_Course")
+  Exercises        Exercises? @relation(fields: [ExerciseID], references: [ExerciseID], onDelete: NoAction, onUpdate: NoAction, map: "FK_LearningActivities_Exercise")
+  Lessons          Lessons?   @relation(fields: [LessonID], references: [LessonID], onDelete: NoAction, onUpdate: NoAction, map: "FK_LearningActivities_Lesson")
+  Users            Users      @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_LearningActivities_User")
+}
+
+model LearningContexts {
+  ContextID           Int              @id(map: "PK__Learning__23A237A92DA47BD9") @default(autoincrement())
+  ProfileID           Int
+  ActivityDataJSON    String?          @db.NVarChar(Max)
+  PerformanceDataJSON String?          @db.NVarChar(Max)
+  CreatedAt           DateTime         @default(dbgenerated("sysdatetime()"), map: "DF__LearningC__Creat__151B244E")
+  AIGenerations       AIGenerations[]
+  LearningProfiles    LearningProfiles @relation(fields: [ProfileID], references: [ProfileID], onUpdate: NoAction, map: "FK_LearningContexts_Profile")
+}
+
+model LearningPathItems {
+  PathItemID           Int              @id(map: "PK__Learning__1DA0F85FA5666108") @default(autoincrement())
+  PathID               Int
+  TargetTopicID        Int?
+  TargetLessonID       Int?
+  TargetExerciseID     Int?
+  RecommendationReason String?          @db.NVarChar(Max)
+  OrderIndex           Int
+  IsCompleted          Boolean          @default(false, map: "DF__LearningP__IsCom__236943A5")
+  Exercises            Exercises?       @relation(fields: [TargetExerciseID], references: [ExerciseID], onDelete: NoAction, onUpdate: NoAction, map: "FK_LearningPathItems_Exercise")
+  Lessons              Lessons?         @relation(fields: [TargetLessonID], references: [LessonID], onDelete: NoAction, onUpdate: NoAction, map: "FK_LearningPathItems_Lesson")
+  LearningPaths        LearningPaths    @relation(fields: [PathID], references: [PathID], onUpdate: NoAction, map: "FK_LearningPathItems_Path")
+  KnowledgeTopics      KnowledgeTopics? @relation(fields: [TargetTopicID], references: [TopicID], onDelete: NoAction, onUpdate: NoAction, map: "FK_LearningPathItems_Topic")
+}
+
+model LearningPaths {
+  PathID            Int                 @id(map: "PK__Learning__CD67DC39AF738D62") @default(autoincrement())
+  UserID            Int
+  CourseID          Int
+  GenerationID      Int
+  Title             String?             @db.NVarChar(200)
+  Status            String              @default("Active", map: "DF__LearningP__Statu__1CBC4616") @db.NVarChar(50)
+  CreatedAt         DateTime            @default(dbgenerated("sysdatetime()"), map: "DF__LearningP__Creat__1DB06A4F")
+  LearningPathItems LearningPathItems[]
+  Courses           Courses             @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_LearningPaths_Course")
+  AIGenerations     AIGenerations       @relation(fields: [GenerationID], references: [GenerationID], onUpdate: NoAction, map: "FK_LearningPaths_Generation")
+  Users             Users               @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_LearningPaths_User")
+}
+
+model LearningProfiles {
+  ProfileID          Int                @id(map: "PK__Learning__290C8884933F0950") @default(autoincrement())
+  UserID             Int
+  CourseID           Int
+  AnalyzedStrengths  String?            @db.NVarChar(Max)
+  AnalyzedWeaknesses String?            @db.NVarChar(Max)
+  OverallMastery     Decimal?           @db.Decimal(5, 2)
+  LearningLevel      String?            @db.NVarChar(30)
+  CreatedAt          DateTime           @default(dbgenerated("sysdatetime()"), map: "DF__LearningP__Creat__10566F31")
+  LearningContexts   LearningContexts[]
+  Courses            Courses            @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_LearningProfiles_Course")
+  Users              Users              @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_LearningProfiles_User")
+}
+
+model Lessons {
+  LessonID           Int                  @id(map: "PK__Lessons__B084ACB025717BD4") @default(autoincrement())
+  ChapterID          Int
+  Title              String               @db.NVarChar(200)
+  ContentType        String?              @db.NVarChar(50)
+  ContentData        String?              @db.NVarChar(Max)
+  OrderIndex         Int
+  Exercises          Exercises[]
+  LearningActivities LearningActivities[]
+  LearningPathItems  LearningPathItems[]
+  Chapters           Chapters             @relation(fields: [ChapterID], references: [ChapterID], onUpdate: NoAction, map: "FK_Lessons_Chapters")
+  LessonTopics       LessonTopics[]
+}
+
+model LessonTopics {
+  LessonID        Int
+  TopicID         Int
+  Lessons         Lessons         @relation(fields: [LessonID], references: [LessonID], onUpdate: NoAction, map: "FK_LessonTopics_Lesson")
+  KnowledgeTopics KnowledgeTopics @relation(fields: [TopicID], references: [TopicID], onUpdate: NoAction, map: "FK_LessonTopics_Topic")
+
+  @@id([LessonID, TopicID], map: "PK_LessonTopics")
+}
+
+model Notifications {
+  NotificationID Int      @id(map: "PK__Notifica__20CF2E323C578508") @default(autoincrement())
+  UserID         Int
+  Title          String   @db.NVarChar(200)
+  Message        String   @db.NVarChar(Max)
+  IsRead         Boolean  @default(false, map: "DF__Notificat__IsRea__2A164134")
+  CreatedAt      DateTime @default(dbgenerated("sysdatetime()"), map: "DF__Notificat__Creat__2B0A656D")
+  Users          Users    @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_Notifications_User")
+}
+
+model RefreshTokens {
+  TokenID   Int       @id(map: "PK__RefreshT__658FEE8A71F3601D") @default(autoincrement())
+  UserID    Int
+  TokenHash String    @unique(map: "UQ__RefreshT__BCB33F9242D84AD6") @db.NVarChar(255)
+  ExpiresAt DateTime
+  RevokedAt DateTime?
+  CreatedAt DateTime  @default(dbgenerated("sysdatetime()"), map: "DF__RefreshTo__Creat__2FCF1A8A")
+  Users     Users     @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_RefreshTokens_User")
+}
+
+model Roles {
+  RoleID   Int     @id(map: "PK__Roles__8AFACE3A581604ED") @default(autoincrement())
+  RoleName String  @unique(map: "UQ__Roles__8A2B6160F2A386BD") @db.NVarChar(50)
+  Users    Users[]
+}
+
+model StudentLearningStats {
+  StatID                Int      @id(map: "PK__StudentL__3A162D1E9E607BB2") @default(autoincrement())
+  UserID                Int
+  CourseID              Int
+  TotalTimeSpentSeconds Int      @default(0, map: "DF__StudentLe__Total__09A971A2")
+  AverageScore          Decimal  @default(0.00, map: "DF__StudentLe__Avera__0A9D95DB") @db.Decimal(5, 2)
+  LastActive            DateTime @default(dbgenerated("sysdatetime()"), map: "DF__StudentLe__LastA__0B91BA14")
+  Courses               Courses  @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_StudentLearningStats_Course")
+  Users                 Users    @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_StudentLearningStats_User")
+
+  @@unique([UserID, CourseID], map: "UQ_StudentLearningStats_User_Course")
+}
+
+model StudentTopicProgress {
+  ProgressID              Int             @id(map: "PK__StudentT__BAE29C850683B67F") @default(autoincrement())
+  UserID                  Int
+  TopicID                 Int
+  TotalQuestionsAttempted Int             @default(0, map: "DF__StudentTo__Total__7F2BE32F")
+  CorrectAnswers          Int             @default(0, map: "DF__StudentTo__Corre__00200768")
+  WrongAnswers            Int             @default(0, map: "DF__StudentTo__Wrong__01142BA1")
+  AverageScore            Decimal         @default(0.00, map: "DF__StudentTo__Avera__02084FDA") @db.Decimal(5, 2)
+  MasteryLevel            Decimal         @default(0.00, map: "DF__StudentTo__Maste__02FC7413") @db.Decimal(5, 2)
+  LastAttemptAt           DateTime?
+  LastUpdated             DateTime        @default(dbgenerated("sysdatetime()"), map: "DF__StudentTo__LastU__03F0984C")
+  KnowledgeTopics         KnowledgeTopics @relation(fields: [TopicID], references: [TopicID], onUpdate: NoAction, map: "FK_StudentTopicProgress_Topic")
+  Users                   Users           @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_StudentTopicProgress_User")
+
+  @@unique([UserID, TopicID], map: "UQ_StudentTopicProgress_User_Topic")
+}
+
+model Submissions {
+  SubmissionID     Int           @id(map: "PK__Submissi__449EE105FA9EEB51") @default(autoincrement())
+  AttemptID        Int
+  QuestionID       Int
+  SelectedAnswerID Int?
+  CodeSubmitted    String?       @db.NVarChar(Max)
+  IsCorrect        Boolean       @default(false, map: "DF__Submissio__IsCor__6FE99F9F")
+  ScoreEarned      Decimal       @default(0.00, map: "DF__Submissio__Score__70DDC3D8") @db.Decimal(5, 2)
+  Answers          Answers?      @relation(fields: [SelectedAnswerID], references: [AnswerID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Submissions_Answer")
+  TestAttempts     TestAttempts  @relation(fields: [AttemptID], references: [AttemptID], onUpdate: NoAction, map: "FK_Submissions_Attempt")
+  TestQuestions    TestQuestions @relation(fields: [QuestionID], references: [QuestionID], onUpdate: NoAction, map: "FK_Submissions_Question")
+}
+
+model SystemLogs {
+  LogID        BigInt   @id(map: "PK__SystemLo__5E5499A89E19EE1E") @default(autoincrement())
+  Level        String?  @db.NVarChar(50)
+  Message      String   @db.NVarChar(Max)
+  MetaDataJSON String?  @db.NVarChar(Max)
+  CreatedAt    DateTime @default(dbgenerated("sysdatetime()"), map: "DF__SystemLog__Creat__339FAB6E")
+}
+
+model TestAttempts {
+  AttemptID   Int           @id(map: "PK__TestAtte__891A6886D5F3A2A9") @default(autoincrement())
+  UserID      Int
+  ExerciseID  Int
+  StartTime   DateTime
+  EndTime     DateTime?
+  TotalScore  Decimal       @default(0.00, map: "DF__TestAttem__Total__6B24EA82") @db.Decimal(5, 2)
+  Submissions Submissions[]
+  Exercises   Exercises     @relation(fields: [ExerciseID], references: [ExerciseID], onUpdate: NoAction, map: "FK_TestAttempts_Exercise")
+  Users       Users         @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_TestAttempts_User")
+}
+
+model TestQuestions {
+  QuestionID      Int             @id(map: "PK__TestQues__0DC06F8CF151C06F") @default(autoincrement())
+  ExerciseID      Int
+  TopicID         Int
+  Content         String          @db.NVarChar(Max)
+  QuestionType    String?         @db.NVarChar(50)
+  Points          Decimal         @default(1.00, map: "DF__TestQuest__Point__628FA481") @db.Decimal(5, 2)
+  Explanation     String?         @db.NVarChar(Max)
+  Answers         Answers[]
+  Submissions     Submissions[]
+  Exercises       Exercises       @relation(fields: [ExerciseID], references: [ExerciseID], onUpdate: NoAction, map: "FK_TestQuestions_Exercise")
+  KnowledgeTopics KnowledgeTopics @relation(fields: [TopicID], references: [TopicID], onUpdate: NoAction, map: "FK_TestQuestions_Topic")
+}
+
+model Users {
+  UserID               Int                    @id(map: "PK__Users__1788CCACFE687AE7") @default(autoincrement())
+  RoleID               Int
+  FullName             String                 @db.NVarChar(100)
+  Email                String                 @unique(map: "UQ__Users__A9D105345C8A9E16") @db.NVarChar(150)
+  PasswordHash         String?                @db.NVarChar(255)
+  AuthProvider         String                 @default("Local", map: "DF__Users__AuthProvi__3C69FB99") @db.NVarChar(30)
+  ProviderUserID       String?                @db.NVarChar(255)
+  IsActive             Boolean                @default(true, map: "DF__Users__IsActive__3D5E1FD2")
+  CreatedAt            DateTime               @default(dbgenerated("sysdatetime()"), map: "DF__Users__CreatedAt__3E52440B")
+  Courses              Courses[]
+  Enrollments          Enrollments[]
+  LearningActivities   LearningActivities[]
+  LearningPaths        LearningPaths[]
+  LearningProfiles     LearningProfiles[]
+  Notifications        Notifications[]
+  RefreshTokens        RefreshTokens[]
+  StudentLearningStats StudentLearningStats[]
+  StudentTopicProgress StudentTopicProgress[]
+  TestAttempts         TestAttempts[]
+  Roles                Roles                  @relation(fields: [RoleID], references: [RoleID], onUpdate: NoAction, map: "FK_Users_Roles")
+}
