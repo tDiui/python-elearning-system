@@ -9,29 +9,38 @@ const JWT_SECRET = process.env.JWT_SECRET || 'pylearn_secret_key_2026';
 // 1. XỬ LÝ ĐĂNG KÝ (REGISTER)
 const register = async (req, res) => {
   try {
-    const { firstName, lastName, email, password } = req.body;
+    const { firstName, lastName, email, password, studentId } = req.body;
     const fullName = `${firstName} ${lastName}`.trim();
+    const normalizedStudentId = String(studentId || '').trim();
 
-    // Kiểm tra xem email đã tồn tại trong Database chưa
-    const existingUser = await prisma.users.findUnique({ where: { Email: email } });
-    if (existingUser) {
+    if (!normalizedStudentId) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập mã sinh viên!' });
+    }
+
+    const existingUserByEmail = await prisma.users.findUnique({ where: { Email: email } });
+    if (existingUserByEmail) {
       return res.status(400).json({ success: false, message: 'Email này đã được sử dụng!' });
     }
 
-    // Mã hóa mật khẩu
+    const existingUserByStudentId = await prisma.users.findFirst({
+      where: { StudentID: normalizedStudentId }
+    });
+    if (existingUserByStudentId) {
+      return res.status(400).json({ success: false, message: 'Mã sinh viên này đã được đăng ký!' });
+    }
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Tìm Role 'Sinh viên' trong DB, nếu chưa có thì tự động tạo
     let studentRole = await prisma.roles.findFirst({ where: { RoleName: 'Sinh viên' } });
     if (!studentRole) {
       studentRole = await prisma.roles.create({ data: { RoleName: 'Sinh viên' } });
     }
 
-    // Lưu User mới vào Database
-    const newUser = await prisma.users.create({
+    await prisma.users.create({
       data: {
         FullName: fullName,
+        StudentID: normalizedStudentId,
         Email: email,
         PasswordHash: hashedPassword,
         RoleID: studentRole.RoleID,

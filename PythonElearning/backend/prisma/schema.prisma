@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlserver"
-//   url      = env("DATABASE_URL")
+  //url      = env("DATABASE_URL")
 }
 
 model AIGenerations {
@@ -318,6 +318,7 @@ model Users {
   ProviderUserID       String?                @db.NVarChar(255)
   IsActive             Boolean                @default(true, map: "DF__Users__IsActive__3D5E1FD2")
   CreatedAt            DateTime               @default(dbgenerated("sysdatetime()"), map: "DF__Users__CreatedAt__3E52440B")
+  StudentID            String?                @unique(map: "UQ__Users__StudentID") @db.NVarChar(50)
   Courses              Courses[]
   Enrollments          Enrollments[]
   LearningActivities   LearningActivities[]

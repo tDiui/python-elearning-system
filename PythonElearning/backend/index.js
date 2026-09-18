@@ -48,9 +48,12 @@ app.get('/api/test-db', async (req, res) => {
 app.use(express.json());
 
 // Tích hợp Auth Routes
-const authRoutes = require('./routes/authRoutes');
+const authRoutes = require('./routes/auth/authRoutes');
 app.use('/api/auth', authRoutes);
 
+// 2. Khu vực dành riêng cho Sinh viên
+const studentRoutes = require('./routes/student/studentRoutes');
+app.use('/api/student', studentRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
