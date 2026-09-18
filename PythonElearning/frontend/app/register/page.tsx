@@ -31,6 +31,11 @@ export default function RegisterPage() {
   // 3. Hàm xử lý khi bấm nút "Tạo tài khoản"
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); // Ngăn trình duyệt tự reload trang
+
+    if (!formData.studentId.trim()) {
+      setMessage({ type: 'error', text: 'Vui lòng nhập mã sinh viên!' });
+      return;
+    }
     
     // Kiểm tra mật khẩu khớp nhau
     if (formData.password !== formData.confirmPassword) {
@@ -50,6 +55,7 @@ export default function RegisterPage() {
           firstName: formData.firstName,
           lastName: formData.lastName,
           email: formData.email,
+          studentId: formData.studentId,
           password: formData.password
         }),
       });

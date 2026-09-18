@@ -49,7 +49,7 @@ export default function LoginPage() {
 
         // Chuyển hướng vào trang Dashboard sau 1 giây
         setTimeout(() => {
-          router.push('/dashboard');
+          router.push('/student/dashboard');
         }, 1000);
       } else {
         setMessage({ type: 'error', text: data.message });
