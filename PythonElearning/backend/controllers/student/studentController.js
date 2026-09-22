@@ -79,4 +79,22 @@ const getDashboardData = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardData };
+// Lấy dữ liệu chi tiết Khóa học đang học
+const getCourseData = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // TODO: Truy vấn Prisma lấy Enrollments -> Courses -> Chapters -> Lessons
+    // Vì hiện tại Database của bạn chưa có dữ liệu Khóa học, mình sẽ tạm thời mô phỏng 
+    // trả về null để Frontend kích hoạt trạng thái "Trống" (Empty State).
+    // Sau này khi có dữ liệu, bạn chỉ cần thay null bằng kết quả truy vấn Prisma.
+    const courseData = null; 
+
+    res.status(200).json({ success: true, data: courseData });
+  } catch (error) {
+    console.error('Lỗi lấy data Course:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+module.exports = { getDashboardData, getCourseData };

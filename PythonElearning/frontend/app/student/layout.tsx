@@ -1,9 +1,12 @@
 "use client";
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation'; // Hook lấy đường dẫn hiện tại
 import { useEffect, useState } from 'react';
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname(); // Ví dụ: '/student/courses'
+  
   const [userName, setUserName] = useState('Student');
   const [notificationCount, setNotificationCount] = useState(0);
 
@@ -36,11 +39,21 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     fetchStudentProfile();
   }, []);
 
+  // Danh sách các menu điều hướng
+  const menuItems = [
+    { title: 'Dashboard', path: '/student/dashboard', icon: '⊞' },
+    { title: 'Courses', path: '/student/courses', icon: '📚' },
+    { title: 'My Learning Path', path: '/student/learning-path', icon: '🗺️' },
+    { title: 'Exercises', path: '/student/exercises', icon: '‹›' },
+    { title: 'Results & Analytics', path: '/student/analytics', icon: '📊' },
+    { title: 'Profile', path: '/student/profile', icon: '👤' },
+  ];
+
   return (
     <div className="flex h-screen bg-[#F8FAFC]">
       
       {/* SIDEBAR */}
-      <aside className="w-64 bg-white border-r border-gray-100 flex flex-col justify-between">
+      <aside className="w-64 bg-white border-r border-gray-100 flex flex-col justify-between shrink-0 z-10">
         <div>
           {/* Logo */}
           <div className="h-16 flex items-center px-6 border-b border-gray-50">
@@ -53,50 +66,51 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
             <span className="font-bold text-gray-900 text-lg">PyLearn AI</span>
           </div>
 
-          {/* Navigation */}
-          <nav className="px-3 mt-2 flex flex-col gap-1">
-            <Link href="/student/dashboard" className="flex items-center gap-3 px-3 py-2.5 bg-blue-50 text-blue-600 rounded-lg font-medium text-sm">
-              <span>⊞</span> Dashboard
-            </Link>
-            <Link href="#" className="flex items-center gap-3 px-3 py-2.5 text-gray-500 hover:bg-gray-50 rounded-lg font-medium text-sm">
-              <span>📚</span> Courses
-            </Link>
-            <Link href="#" className="flex items-center gap-3 px-3 py-2.5 text-gray-500 hover:bg-gray-50 rounded-lg font-medium text-sm">
-              <span>🗺️</span> My Learning Path
-            </Link>
-            <Link href="#" className="flex items-center gap-3 px-3 py-2.5 text-gray-500 hover:bg-gray-50 rounded-lg font-medium text-sm">
-              <span>‹›</span> Exercises
-            </Link>
-            <Link href="#" className="flex items-center gap-3 px-3 py-2.5 text-gray-500 hover:bg-gray-50 rounded-lg font-medium text-sm">
-              <span>📊</span> Results & Analytics
-            </Link>
-            <Link href="#" className="flex items-center gap-3 px-3 py-2.5 text-gray-500 hover:bg-gray-50 rounded-lg font-medium text-sm">
-              <span>👤</span> Profile
-            </Link>
+          {/* Navigation - Đã được làm động hóa */}
+          <nav className="px-3 mt-4 flex flex-col gap-1">
+            {menuItems.map((item) => {
+              // Kiểm tra xem đường dẫn hiện tại có khớp với menu không
+              const isActive = pathname === item.path;
+              
+              return (
+                <Link 
+                  key={item.path}
+                  href={item.path} 
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${
+                    isActive 
+                      ? 'bg-blue-50 text-blue-600' 
+                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <span className={isActive ? 'text-blue-600' : 'text-gray-400'}>{item.icon}</span> 
+                  {item.title}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
         {/* Bottom Actions */}
         <div className="p-4 border-t border-gray-100">
           <div className="flex flex-col gap-2 mb-4">
-             <Link href="#" className="flex items-center justify-between text-gray-500 text-sm font-medium hover:text-gray-900">
-                <div className="flex items-center gap-3"><span>🔔</span> Notifications</div>
+             <Link href="/student/notifications" className="flex items-center justify-between text-gray-500 text-sm font-medium hover:text-gray-900 px-2 py-1.5 rounded-lg hover:bg-gray-50">
+                <div className="flex items-center gap-3"><span className="text-gray-400">🔔</span> Notifications</div>
                 {notificationCount > 0 && (
                   <span className="w-5 h-5 bg-blue-600 text-white text-[10px] rounded-full flex items-center justify-center">
                     {notificationCount}
                   </span>
                 )}
              </Link>
-             <Link href="#" className="flex items-center gap-3 text-gray-500 text-sm font-medium hover:text-gray-900 mt-2">
-                <span>⚡</span> Take a Quiz
+             <Link href="/student/quiz" className="flex items-center gap-3 text-gray-500 text-sm font-medium hover:text-gray-900 px-2 py-1.5 rounded-lg hover:bg-gray-50 mt-1">
+                <span className="text-gray-400">⚡</span> Take a Quiz
              </Link>
           </div>
-          <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
-            <div className="w-8 h-8 bg-blue-100 text-blue-600 font-bold rounded-full flex items-center justify-center text-sm">
-              {userName?.charAt(0)?.toUpperCase() || 'S'}
+          <div className="flex items-center gap-3 pt-4 border-t border-gray-100 px-2">
+            <div className="w-8 h-8 bg-blue-100 text-blue-600 font-bold rounded-full flex items-center justify-center text-sm uppercase shrink-0">
+              {userName?.charAt(0) || 'S'}
             </div>
-            <div>
-              <p className="text-sm font-bold text-gray-900">{userName}</p>
+            <div className="overflow-hidden">
+              <p className="text-sm font-bold text-gray-900 truncate">{userName}</p>
               <p className="text-[11px] text-gray-500">Student</p>
             </div>
           </div>
@@ -107,7 +121,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       <main className="flex-1 flex flex-col overflow-hidden">
         
         {/* TOPBAR */}
-        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-8">
+        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-8 shrink-0 z-10">
           <div className="relative w-96">
             <span className="absolute left-3 top-1.5 text-gray-400">🔍</span>
             <input 
@@ -117,13 +131,20 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
             />
           </div>
           <div className="flex items-center gap-4">
-            <button className="text-gray-400 hover:text-gray-600">🔔</button>
-            <div className="w-8 h-8 bg-blue-100 text-blue-600 font-bold rounded-full flex items-center justify-center text-sm">M</div>
+            <button className="text-gray-400 hover:text-gray-600 relative">
+              🔔
+              {notificationCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>
+              )}
+            </button>
+            <div className="w-8 h-8 bg-blue-100 text-blue-600 font-bold rounded-full flex items-center justify-center text-sm uppercase">
+              {userName?.charAt(0) || 'M'}
+            </div>
           </div>
         </header>
 
-        {/* DYNAMIC CONTENT (Trang Dashboard sẽ được nhúng vào đây) */}
-        <div className="flex-1 overflow-y-auto p-8">
+        {/* DYNAMIC CONTENT */}
+        <div className="flex-1 overflow-y-auto p-8 bg-[#F8FAFC]">
           {children}
         </div>
 
