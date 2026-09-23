@@ -97,4 +97,17 @@ const getCourseData = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardData, getCourseData };
+// Lấy dữ liệu Hồ sơ năng lực học tập
+const getProfileData = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const profileData = null;
+
+    res.status(200).json({ success: true, data: profileData });
+  } catch (error) {
+    console.error('Lỗi lấy data Profile:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+module.exports = { getDashboardData, getCourseData, getProfileData };
