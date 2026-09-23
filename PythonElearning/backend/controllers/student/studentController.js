@@ -110,4 +110,49 @@ const getProfileData = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardData, getCourseData, getProfileData };
+// Lấy chi tiết bài học đang học
+const getLessonDetail = async (req, res) => {
+  try {
+    const lessonId = parseInt(req.query.id);
+    
+    if (!lessonId) {
+      return res.status(400).json({ success: false, message: 'Thiếu ID bài học' });
+    }
+
+    // Truy vấn Prisma lấy chi tiết Lesson và thông tin Chapter đi kèm
+    const lesson = await prisma.lessons.findUnique({
+      where: { LessonID: lessonId },
+      include: {
+        Chapters: { 
+          select: { Title: true } 
+        }
+      }
+    });
+
+    if (!lesson) {
+      return res.status(404).json({ success: false, message: 'Bài học không tồn tại' });
+    }
+
+    // Map lại dữ liệu cho Frontend dễ đọc
+    const data = {
+      id: lesson.LessonID,
+      title: lesson.Title,
+      chapter: lesson.Chapters.Title,
+      duration: lesson.DurationMinutes,
+      difficulty: lesson.Difficulty || "Beginner",
+      hasVideo: lesson.HasVideo,
+      videoUrl: lesson.VideoUrl,
+      hasSlide: lesson.HasSlide,
+      slideUrl: lesson.SlideUrl,
+      hasArticle: lesson.HasArticle,
+      articleContent: lesson.ArticleContent,
+    };
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error('Lỗi lấy chi tiết bài học:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+module.exports = { getDashboardData, getCourseData, getProfileData, getLessonDetail };

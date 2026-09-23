@@ -41,7 +41,7 @@ model Categories {
 }
 
 model Chapters {
-  ChapterID  Int       @id(map: "PK__Chapters__0893A34AE6A80156") @default(autoincrement())
+  ChapterID  Int       @id(map: "PK__Chapters__0893A34A600B902A") @default(autoincrement())
   CourseID   Int
   Title      String    @db.NVarChar(200)
   OrderIndex Int
@@ -50,13 +50,13 @@ model Chapters {
 }
 
 model Courses {
-  CourseID             Int                    @id(map: "PK__Courses__C92D7187CE29EB78") @default(autoincrement())
+  CourseID             Int                    @id(map: "PK__Courses__C92D7187EAE8B0E8") @default(autoincrement())
   InstructorID         Int
   CategoryID           Int
   Title                String                 @db.NVarChar(200)
   Description          String?                @db.NVarChar(Max)
-  Status               String                 @default("Draft", map: "DF__Courses__Status__4222D4EF") @db.NVarChar(50)
-  CreatedAt            DateTime               @default(dbgenerated("sysdatetime()"), map: "DF__Courses__Created__4316F928")
+  Status               String                 @default("Draft", map: "DF__Courses__Status__2C3393D0") @db.NVarChar(50)
+  CreatedAt            DateTime               @default(now(), map: "DF__Courses__Created__2D27B809") @db.DateTime2
   Chapters             Chapters[]
   Categories           Categories             @relation(fields: [CategoryID], references: [CategoryID], onUpdate: NoAction, map: "FK_Courses_Category")
   Users                Users                  @relation(fields: [InstructorID], references: [UserID], onUpdate: NoAction, map: "FK_Courses_Instructor")
@@ -183,16 +183,22 @@ model LearningProfiles {
 }
 
 model Lessons {
-  LessonID           Int                  @id(map: "PK__Lessons__B084ACB025717BD4") @default(autoincrement())
+  LessonID           Int                  @id(map: "PK__Lessons__B084ACB06AF37D48") @default(autoincrement())
   ChapterID          Int
   Title              String               @db.NVarChar(200)
-  ContentType        String?              @db.NVarChar(50)
-  ContentData        String?              @db.NVarChar(Max)
-  OrderIndex         Int
+  OrderIndex         Int                  @default(0)
+  DurationMinutes    Int                  @default(0)
+  Difficulty         String?              @db.NVarChar(50)
+  HasVideo           Boolean              @default(false)
+  VideoUrl           String?              @db.NVarChar(500)
+  HasSlide           Boolean              @default(false)
+  SlideUrl           String?              @db.NVarChar(500)
+  HasArticle         Boolean              @default(true)
+  ArticleContent     String?              @db.NVarChar(Max)
   Exercises          Exercises[]
   LearningActivities LearningActivities[]
   LearningPathItems  LearningPathItems[]
-  Chapters           Chapters             @relation(fields: [ChapterID], references: [ChapterID], onUpdate: NoAction, map: "FK_Lessons_Chapters")
+  Chapters           Chapters             @relation(fields: [ChapterID], references: [ChapterID], onDelete: Cascade, onUpdate: NoAction, map: "FK_Lessons_Chapters")
   LessonTopics       LessonTopics[]
 }
 
