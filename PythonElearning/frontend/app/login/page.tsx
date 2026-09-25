@@ -41,6 +41,17 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (data.success) {
+        const roleName = String(data.user?.role || '').trim().toLowerCase();
+        const normalizedRole = roleName.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const isAllowedRole = ['sinh vien', 'student', 'giang vien', 'teacher', 'admin', 'quan tri vien'].includes(normalizedRole);
+
+        if (!isAllowedRole) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setMessage({ type: 'error', text: 'Tài khoản này không có quyền đăng nhập vào hệ thống.' });
+          return;
+        }
+
         setMessage({ type: 'success', text: 'Đăng nhập thành công! Đang vào hệ thống...' });
         
         // LƯU TOKEN VÀ THÔNG TIN USER VÀO LOCAL STORAGE
@@ -49,7 +60,13 @@ export default function LoginPage() {
 
         // Chuyển hướng vào trang Dashboard sau 1 giây
         setTimeout(() => {
-          router.push('/student/dashboard');
+          if (normalizedRole.includes('admin') || normalizedRole.includes('quan tri vien')) {
+            router.push('/admin/dashboard');
+          } else if (normalizedRole.includes('giang vien') || normalizedRole.includes('teacher')) {
+            router.push('/teacher/dashboard');
+          } else {
+            router.push('/student/dashboard');
+          }
         }, 1000);
       } else {
         setMessage({ type: 'error', text: data.message });

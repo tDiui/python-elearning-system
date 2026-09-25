@@ -56,7 +56,7 @@ model Courses {
   Title                String                 @db.NVarChar(200)
   Description          String?                @db.NVarChar(Max)
   Status               String                 @default("Draft", map: "DF__Courses__Status__2C3393D0") @db.NVarChar(50)
-  CreatedAt            DateTime               @default(now(), map: "DF__Courses__Created__2D27B809") @db.DateTime2
+  CreatedAt            DateTime               @default(now(), map: "DF__Courses__Created__2D27B809")
   Chapters             Chapters[]
   Categories           Categories             @relation(fields: [CategoryID], references: [CategoryID], onUpdate: NoAction, map: "FK_Courses_Category")
   Users                Users                  @relation(fields: [InstructorID], references: [UserID], onUpdate: NoAction, map: "FK_Courses_Instructor")
@@ -187,14 +187,14 @@ model Lessons {
   ChapterID          Int
   Title              String               @db.NVarChar(200)
   OrderIndex         Int                  @default(0)
-  DurationMinutes    Int                  @default(0)
-  Difficulty         String?              @db.NVarChar(50)
-  HasVideo           Boolean              @default(false)
-  VideoUrl           String?              @db.NVarChar(500)
-  HasSlide           Boolean              @default(false)
-  SlideUrl           String?              @db.NVarChar(500)
-  HasArticle         Boolean              @default(true)
   ArticleContent     String?              @db.NVarChar(Max)
+  Difficulty         String?              @db.NVarChar(50)
+  DurationMinutes    Int                  @default(0)
+  HasArticle         Boolean              @default(true)
+  HasSlide           Boolean              @default(false)
+  HasVideo           Boolean              @default(false)
+  SlideUrl           String?              @db.NVarChar(500)
+  VideoUrl           String?              @db.NVarChar(500)
   Exercises          Exercises[]
   LearningActivities LearningActivities[]
   LearningPathItems  LearningPathItems[]

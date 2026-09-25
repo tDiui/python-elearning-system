@@ -59,3 +59,6 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server Backend đang chạy tại http://localhost:${PORT}`);
 });
+
+const teacherRoutes = require('./routes/teacher/teacherRoutes');
+app.use('/api/teacher', teacherRoutes);

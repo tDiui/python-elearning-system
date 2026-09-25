@@ -6,6 +6,16 @@ const prisma = new PrismaClient();
 // Khóa bí mật để tạo Token (Sau này nên đưa vào file .env)
 const JWT_SECRET = process.env.JWT_SECRET || 'pylearn_secret_key_2026';
 
+const normalizeRoleName = (roleName = '') => {
+  return String(roleName)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+};
+
+const allowedLoginRoles = ['sinh vien', 'student', 'giang vien', 'teacher', 'admin', 'quan tri vien'];
+
 // 1. XỬ LÝ ĐĂNG KÝ (REGISTER)
 const register = async (req, res) => {
   try {
@@ -73,6 +83,14 @@ const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.PasswordHash);
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Sai mật khẩu!' });
+    }
+
+    const normalizedRole = normalizeRoleName(user.Roles?.RoleName || '');
+    if (!allowedLoginRoles.includes(normalizedRole)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản này không có quyền đăng nhập vào hệ thống.'
+      });
     }
 
     // Tạo JWT Token có thời hạn 1 ngày
