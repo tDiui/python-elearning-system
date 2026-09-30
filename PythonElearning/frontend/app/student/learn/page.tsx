@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
@@ -19,12 +19,12 @@ type LessonData = {
   articleContent: string | null;
 };
 
-export default function LearnPage() {
+function LearnPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  
+
   // Lấy ID bài học từ URL (ví dụ: ?id=1). Nếu không có, mặc định là 1.
-  const lessonId = searchParams.get('id') || '1'; 
+  const lessonId = searchParams.get('id') || '1';
 
   const [lessonData, setLessonData] = useState<LessonData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,14 +41,14 @@ export default function LearnPage() {
         }
 
         const response = await fetch(`http://localhost:5000/api/student/learn?id=${lessonId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` }
         });
 
         const result = await response.json();
-        
+
         if (result.success && result.data) {
           setLessonData(result.data);
-          
+
           // Tự động quyết định Tab nào được mở đầu tiên dựa trên nội dung bài học
           if (result.data.hasVideo) setActiveTab('video');
           else if (result.data.hasSlide) setActiveTab('slide');
@@ -77,7 +77,7 @@ export default function LearnPage() {
   // TRẠNG THÁI TRỐNG (Khi DB chưa có bài học nào)
   if (!lessonData) {
     return (
-      <div className="flex flex-col items-center justify-center h-[80vh] bg-white rounded-2xl border border-gray-100 shadow-sm text-center p-8 max-w-[1400px] mx-auto">
+      <div className="flex flex-col items-center justify-center h-[80vh] bg-white rounded-2xl border border-gray-100 shadow-sm text-center p-8 max-w-350 mx-auto">
         <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-4xl mb-4">📭</div>
         <h2 className="text-xl font-bold text-gray-900 mb-2">Không tìm thấy bài học</h2>
         <p className="text-gray-500 mb-6 max-w-md text-sm">Bài học bạn yêu cầu không tồn tại hoặc chưa được cập nhật dữ liệu vào hệ thống.</p>
@@ -89,7 +89,7 @@ export default function LearnPage() {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 max-w-[1400px] mx-auto h-[calc(100vh-80px)]">
+    <div className="flex flex-col lg:flex-row gap-6 max-w-350 mx-auto h-[calc(100vh-80px)]">
       
       {/* 1. CỘT TRÁI: DANH SÁCH BÀI HỌC */}
       <div className="w-full lg:w-64 bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col shrink-0 overflow-hidden">
@@ -165,7 +165,7 @@ export default function LearnPage() {
 
           {/* TAB 2: SLIDE */}
           {activeTab === 'slide' && lessonData.slideUrl && (
-            <div className="w-full h-full min-h-[400px] rounded-xl overflow-hidden border border-gray-200">
+            <div className="w-full h-full min-h-100 rounded-xl overflow-hidden border border-gray-200">
                <iframe 
                  src={lessonData.slideUrl} 
                  className="w-full h-full"
@@ -221,5 +221,13 @@ export default function LearnPage() {
       </div>
       
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex h-[80vh] items-center justify-center text-gray-500">Đang tải bài học...</div>}>
+      <LearnPageContent />
+    </Suspense>
   );
 }

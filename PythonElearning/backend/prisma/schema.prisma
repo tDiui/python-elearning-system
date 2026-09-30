@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlserver"
-  //url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 model AIGenerations {
@@ -89,6 +89,12 @@ model Exercises {
   TimeLimitMinutes   Int                  @default(0, map: "DF__Exercises__TimeL__5BE2A6F2")
   DifficultyLevel    Int                  @default(1, map: "DF__Exercises__Diffi__5CD6CB2B")
   MaxScore           Decimal              @default(10.00, map: "DF__Exercises__MaxSc__5DCAEF64") @db.Decimal(5, 2)
+  Content            String?              @db.NVarChar(Max)
+  StarterCode        String?              @db.NVarChar(Max)
+  Hints              String?              @db.NVarChar(Max)
+  TestCases          String?              @db.NVarChar(Max)
+  Status             String               @default("Draft", map: "DF__Exercises__Statu__4D5F7D71") @db.NVarChar(50)
+  QuizConfig         String?              @db.NVarChar(Max)
   Lessons            Lessons?             @relation(fields: [LessonID], references: [LessonID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Exercises_Lesson")
   KnowledgeTopics    KnowledgeTopics?     @relation(fields: [TopicID], references: [TopicID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Exercises_Topic")
   LearningActivities LearningActivities[]
@@ -195,6 +201,8 @@ model Lessons {
   HasVideo           Boolean              @default(false)
   SlideUrl           String?              @db.NVarChar(500)
   VideoUrl           String?              @db.NVarChar(500)
+  Objectives         String?              @db.NVarChar(Max)
+  CodeExample        String?              @db.NVarChar(Max)
   Exercises          Exercises[]
   LearningActivities LearningActivities[]
   LearningPathItems  LearningPathItems[]
