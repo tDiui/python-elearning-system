@@ -43,6 +43,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const menuItems = [
     { title: 'Dashboard', path: '/student/dashboard', icon: '⊞' },
     { title: 'Courses', path: '/student/courses', icon: '📚' },
+    { title: 'Khám phá khóa học', path: '/student/explore', icon: '🔍' },
     { title: 'My Learning Path', path: '/student/learning-path', icon: '🗺️' },
     { title: 'Exercises', path: '/student/exercises', icon: '‹›' },
     { title: 'Results & Analytics', path: '/student/analytics', icon: '📊' },

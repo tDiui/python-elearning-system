@@ -44,7 +44,16 @@ export default function CoursesPage() {
   const router = useRouter();
   const [data, setData] = useState<CourseData | null>(null);
   const [loading, setLoading] = useState(true);
-
+  const handleLessonClick = (lessonId: number, status: string) => {
+    if (status === 'locked') {
+      alert('🔒 Bài học này đang bị khóa. Bạn cần hoàn thành bài học trước đó!');
+      return;
+    }
+    
+    // Chuyển hướng sang trang chi tiết bài học. 
+    // Giả sử đường dẫn trang học của bạn là /student/lesson/[id]
+    router.push(`/student/lesson/${lessonId}`);
+  };
   // GỌI API LẤY DỮ LIỆU TỪ BACKEND
   useEffect(() => {
     const fetchCourse = async () => {
@@ -213,7 +222,11 @@ export default function CoursesPage() {
               
               <div className="flex flex-col">
                 {chapter.lessons.map((lesson, idx) => (
-                  <div key={lesson.id} className={`flex items-center justify-between p-4 px-6 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors cursor-pointer ${lesson.status === 'in-progress' ? 'bg-blue-50/30' : ''}`}>
+                  <div 
+                        key={lesson.id} 
+                        onClick={() => handleLessonClick(lesson.id, lesson.status)}
+                        className={`flex items-center justify-between p-4 px-6 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors cursor-pointer ${lesson.status === 'in-progress' ? 'bg-blue-50/30' : ''} ${lesson.status === 'locked' ? 'opacity-60 cursor-not-allowed hover:bg-transparent' : ''}`}
+                      >
                     <div className="flex items-center gap-4">
                       {renderLessonIcon(lesson.status)}
                       <span className={`text-sm font-medium ${lesson.status === 'locked' ? 'text-gray-400' : (lesson.status === 'in-progress' ? 'text-blue-700' : 'text-gray-700')}`}>

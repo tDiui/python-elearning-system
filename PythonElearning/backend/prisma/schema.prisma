@@ -74,6 +74,7 @@ model Enrollments {
   CourseID        Int
   EnrolledAt      DateTime @default(dbgenerated("sysdatetime()"), map: "DF__Enrollmen__Enrol__4E88ABD4")
   ProgressPercent Decimal  @default(0.00, map: "DF__Enrollmen__Progr__4F7CD00D") @db.Decimal(5, 2)
+  Status          String   @default("Pending", map: "DF__Enrollmen__Statu__607251E5") @db.NVarChar(20)
   Courses         Courses  @relation(fields: [CourseID], references: [CourseID], onUpdate: NoAction, map: "FK_Enrollments_Course")
   Users           Users    @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_Enrollments_User")
 
