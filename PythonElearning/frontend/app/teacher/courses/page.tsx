@@ -79,6 +79,21 @@ const fetchCourseData = useCallback(async () => {
     void fetchCourseData();
   }, [fetchCourseData]);
 
+// Thêm state để quản lý trạng thái đã xuất bản hay chưa
+  const [isPublished, setIsPublished] = useState(false);
+
+  // Hàm xử lý khi bấm nút Publish
+  const handlePublish = async () => {
+    if (!window.confirm("Bạn có chắc chắn muốn xuất bản bài học này?")) return;
+    
+    // Ở đây bạn có thể gọi API tới Backend nếu Database có cột IsPublished
+    // Ví dụ: await fetch('/api/teacher/lessons/publish', { method: 'PUT' });
+
+    // Cập nhật giao diện ngay lập tức
+    setIsPublished(true);
+    alert("🎉 Đã xuất bản bài học thành công!");
+  };
+
   const resetLessonEditors = () => {
     setIsEditingContent(false);
     setIsEditingObjectives(false);
@@ -398,8 +413,19 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
                 <h1 className="text-3xl font-bold text-gray-900">{activeLesson.title}</h1>
               </div>
               <div className="flex gap-3">
-                <button className="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Preview</button>
-                <button className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 flex items-center gap-2">✓ Publish</button>
+              <button className="px-4 py-2 border border-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-50">
+                    Preview
+                  </button>
+                  
+                  {isPublished ? (
+                    <button disabled className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 font-bold rounded-lg flex items-center gap-2 cursor-not-allowed">
+                      ✓ Đã xuất bản
+                    </button>
+                  ) : (
+                    <button onClick={handlePublish} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm">
+                      ✓ Publish
+                    </button>
+                  )}
               </div>
             </div>
 

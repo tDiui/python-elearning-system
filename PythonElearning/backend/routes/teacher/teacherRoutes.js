@@ -4,7 +4,7 @@ const { verifyToken } = require('../../middlewares/authMiddleware');
 const { 
   getTeacherDashboard, getTeacherLayoutData, getTeacherCourseManagement,
   createCourse, createChapter, createLesson,
-  updateChapter, deleteChapter, updateLesson, deleteLesson, createExercise, deleteExercise , getTeacherExercises, updateExerciseDetails, getTeacherQuizzes, createQuiz
+  updateChapter, deleteChapter, updateLesson, deleteLesson, createExercise, deleteExercise , getTeacherExercises, updateExerciseDetails, getTeacherQuizzes, createQuiz, getEnrollments, updateEnrollmentStatus
 } = require('../../controllers/teacher/teacherController');
 
 router.get('/dashboard', verifyToken, getTeacherDashboard);
@@ -27,4 +27,9 @@ router.put('/exercise/:id', verifyToken, updateExerciseDetails);
 
 router.get('/quizzes', verifyToken, getTeacherQuizzes);
 router.post('/quiz', verifyToken, createQuiz);
+
+router.get('/enrollments', verifyToken, getEnrollments);
+router.put('/enrollments/:id/status', verifyToken, updateEnrollmentStatus);
+
+
 module.exports = router;

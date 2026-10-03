@@ -21,29 +21,29 @@ const getTeacherDashboard = async (req, res) => {
     }
 
     // Đếm số đơn đăng ký đang chờ duyệt
-    // const pendingApprovals = await prisma.enrollments.count({
-    //   where: { 
-    //     CourseID: course.CourseID,
-    //     Status: 'Pending' 
-    //   }
-    // });
-
-    // // Đếm số sinh viên đang Active
-    // const activeStudents = await prisma.enrollments.count({
-    //   where: { 
-    //     CourseID: course.CourseID,
-    //     Status: 'Active' 
-    //   }
-    // });
-    // Không dùng cột Status nữa vì DB không có
-    const pendingApprovals = 0; 
-
-    // Đếm tổng số sinh viên trong khóa học (bỏ điều kiện Status)
-    const activeStudents = await prisma.enrollments.count({
+    const pendingApprovals = await prisma.enrollments.count({
       where: { 
-        CourseID: course.CourseID
+        CourseID: course.CourseID,
+        Status: 'Pending' 
       }
     });
+
+    // Đếm số sinh viên đang Active
+    const activeStudents = await prisma.enrollments.count({
+      where: { 
+        CourseID: course.CourseID,
+        Status: 'Active' 
+      }
+    });
+    // // Không dùng cột Status nữa vì DB không có
+    // const pendingApprovals = 0; 
+
+    // // Đếm tổng số sinh viên trong khóa học (bỏ điều kiện Status)
+    // const activeStudents = await prisma.enrollments.count({
+    //   where: { 
+    //     CourseID: course.CourseID
+    //   }
+    // });
 
     const data = {
       courseName: course.Title,
@@ -226,6 +226,7 @@ const createLesson = async (req, res) => {
 };
 
 
+
 // PUT: ĐỔI TÊN CHAPTER
 const updateChapter = async (req, res) => {
   try {
@@ -359,8 +360,7 @@ const getTeacherExercises = async (req, res) => {
   }
 };
 
-// PUT: CẬP NHẬT CHI TIẾT BÀI TẬP
-// PUT: CẬP NHẬT CHI TIẾT BÀI TẬP VÀ BÀI KIỂM TRA
+
 const updateExerciseDetails = async (req, res) => {
   try {
     const { id } = req.params;
@@ -457,6 +457,62 @@ const createQuiz = async (req, res) => {
   }
 };
 
+// GET: LẤY DANH SÁCH SINH VIÊN ĐĂNG KÝ
+const getEnrollments = async (req, res) => {
+  try {
+    const teacherId = req.user.userId;
+    
+    // Lấy tất cả enrollments thuộc về các khóa học do giảng viên này dạy
+    const enrollments = await prisma.enrollments.findMany({
+      where: {
+        Courses: { InstructorID: teacherId }
+      },
+      include: {
+        Users: { select: { FullName: true, Email: true, StudentID: true } },
+        Courses: { select: { Title: true } }
+      },
+      orderBy: { EnrolledAt: 'desc' } // Mới nhất lên đầu
+    });
+
+    // Format lại dữ liệu cho Frontend dễ dùng
+    const formattedData = enrollments.map(en => ({
+      id: en.EnrollmentID,
+      studentName: en.Users?.FullName || 'Chưa cập nhật',
+      email: en.Users?.Email,
+      studentId: en.Users?.StudentID || 'Chưa có MSSV',
+      courseTitle: en.Courses?.Title,
+      status: en.Status, // 'Pending', 'Active' (Đã duyệt), 'Rejected' (Từ chối)
+      enrollmentDate: en.EnrolledAt,
+      // Dữ liệu mô phỏng cho UI (Vì DB hiện tại chưa lưu kinh nghiệm và điểm AI Match)
+      experience: "Đã có kiến thức cơ bản, muốn học chuyên sâu.", 
+      aiMatch: Math.floor(Math.random() * (95 - 60 + 1)) + 60 // Random 60-95%
+    }));
+
+    res.status(200).json({ success: true, data: formattedData });
+  } catch (error) {
+    console.error('Lỗi lấy danh sách đăng ký:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+// PUT: DUYỆT HOẶC TỪ CHỐI ĐĂNG KÝ
+const updateEnrollmentStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // Bắt buộc là 'Active' (Duyệt) hoặc 'Rejected' (Từ chối)
+
+    await prisma.enrollments.update({
+      where: { EnrollmentID: parseInt(id) },
+      data: { Status: status }
+    });
+
+    res.status(200).json({ success: true, message: 'Cập nhật trạng thái thành công' });
+  } catch (error) {
+    console.error('Lỗi cập nhật trạng thái đăng ký:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
 module.exports = {
   getTeacherDashboard,
   getTeacherLayoutData,
@@ -473,5 +529,7 @@ module.exports = {
   getTeacherExercises,
   updateExerciseDetails,
   getTeacherQuizzes, 
-  createQuiz
+  createQuiz,
+  getEnrollments,
+  updateEnrollmentStatus
 };
