@@ -296,12 +296,43 @@ const createExercise = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Vui lòng chọn Chủ đề (Bài học)' });
     }
 
+    const lesson = await prisma.lessons.findUnique({
+      where: { LessonID: parseInt(lessonId) },
+      select: {
+        Title: true,
+        Chapters: { select: { CourseID: true, Title: true } }
+      }
+    });
+
+    if (!lesson) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy bài học' });
+    }
+
+    const topicName = lesson.Chapters.Title.slice(0, 150);
+    let topic = await prisma.knowledgeTopics.findFirst({
+      where: {
+        CourseID: lesson.Chapters.CourseID,
+        TopicName: topicName
+      }
+    });
+
+    if (!topic) {
+      topic = await prisma.knowledgeTopics.create({
+        data: {
+          CourseID: lesson.Chapters.CourseID,
+          TopicName: topicName,
+          Description: lesson.Title
+        }
+      });
+    }
+
     // Chuyển đổi chữ Easy/Medium/Hard thành số 1/2/3 cho SQL
     const diffLevel = difficulty === 'Hard' ? 3 : difficulty === 'Medium' ? 2 : 1;
 
     const newEx = await prisma.exercises.create({
       data: {
         LessonID: parseInt(lessonId), 
+        TopicID: topic.TopicID,
         Title: title, 
         Type: 'Practice',
         TimeLimitMinutes: 15, 
