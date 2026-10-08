@@ -330,7 +330,12 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
               <h3 className="font-bold text-gray-900 mb-4 text-[14px]">Bài tập liên quan</h3>
               <div className="space-y-2">
                 {lesson.exercises.map((ex) => (
-                  <div key={ex.id} className="bg-white border border-gray-100 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:border-blue-200 hover:shadow-sm transition-all group">
+                  <div 
+                        key={ex.id} 
+                        // THÊM SỰ KIỆN CLICK VÀO ĐÂY:
+                        onClick={() => router.push(`/student/exercises/${ex.id}`)} 
+                        className="bg-white border border-gray-100 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:border-blue-200 hover:shadow-sm transition-all group"
+                      >
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0 text-xl">💻</div>
                       <div>
