@@ -2,13 +2,22 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation'; // Hook lấy đường dẫn hiện tại
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+
+const subscribeToHydration = () => () => {};
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); // Ví dụ: '/student/courses'
   
   const [userName, setUserName] = useState('Student');
   const [notificationCount, setNotificationCount] = useState(0);
+  const isMounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot
+  );
 
   useEffect(() => {
     const fetchStudentProfile = async () => {
@@ -71,7 +80,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           <nav className="px-3 mt-4 flex flex-col gap-1">
             {menuItems.map((item) => {
               // Kiểm tra xem đường dẫn hiện tại có khớp với menu không
-              const isActive = pathname === item.path;
+              const isActive = isMounted && pathname === item.path;
               
               return (
                 <Link 
@@ -102,8 +111,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                   </span>
                 )}
              </Link>
-             <Link href="/student/quiz" className="flex items-center gap-3 text-gray-500 text-sm font-medium hover:text-gray-900 px-2 py-1.5 rounded-lg hover:bg-gray-50 mt-1">
-                <span className="text-gray-400">⚡</span> Take a Quiz
+             <Link href="/student/quiz" className={`flex items-center gap-3 text-sm font-medium px-2 py-1.5 rounded-lg mt-1 ${isMounted && pathname.startsWith('/student/quiz') ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}>
+                <span className={isMounted && pathname.startsWith('/student/quiz') ? 'text-blue-600' : 'text-gray-400'}>⚡</span> Take a Quiz
              </Link>
           </div>
           <div className="flex items-center gap-3 pt-4 border-t border-gray-100 px-2">

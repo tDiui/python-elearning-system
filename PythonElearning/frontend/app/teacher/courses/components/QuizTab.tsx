@@ -37,6 +37,10 @@ interface Quiz {
   timeLimit: number;
   status: string;
   config: QuizConfig;
+  studentCount: number;
+  attemptCount: number;
+  averageScore: number;
+  passRate: number;
 }
 
 interface QuizTabProps {
@@ -251,11 +255,13 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
                   </button>
                 ) : (
                   <div className="flex items-center gap-4 text-xs font-medium text-gray-500">
-                    <span className="text-gray-900 font-bold">0</span> lượt làm
+                    <span className="text-gray-900 font-bold">{quiz.studentCount}</span> sinh viên
                     <span className="text-gray-300">•</span>
-                    <span>Avg: <span className="text-emerald-600 font-bold">0%</span></span>
+                    <span className="text-gray-900 font-bold">{quiz.attemptCount}</span> lượt làm
                     <span className="text-gray-300">•</span>
-                    <span>Pass: <span className="text-gray-900 font-bold">0%</span></span>
+                    <span>Avg: <span className="text-emerald-600 font-bold">{quiz.averageScore}%</span></span>
+                    <span className="text-gray-300">•</span>
+                    <span>Pass: <span className="text-gray-900 font-bold">{quiz.passRate}%</span></span>
                   </div>
                 )}
               </div>

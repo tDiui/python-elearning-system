@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../../middlewares/authMiddleware');
-const { getDashboardData, getCourseData, getProfileData, getLessonDetail, getExploreData, enrollCourse, getExerciseDetail, getAllExercises, executeCode, submitExercise } = require('../../controllers/student/studentController');
+const { getDashboardData, getCourseData, getProfileData, getLessonDetail, getExploreData, enrollCourse, getExerciseDetail, getAllExercises, executeCode, submitExercise, getStudentQuizzes, getStudentQuiz, submitStudentQuiz } = require('../../controllers/student/studentController');
 
 router.get('/dashboard', verifyToken, getDashboardData);
 router.get('/courses', verifyToken, getCourseData);
@@ -13,6 +13,9 @@ router.post('/enroll', verifyToken, enrollCourse);
 router.get('/lesson', verifyToken, getLessonDetail);
 router.get('/exercise', verifyToken, getExerciseDetail);
 router.get('/exercises', verifyToken, getAllExercises);
+router.get('/quizzes', verifyToken, getStudentQuizzes);
+router.get('/quiz/:id', verifyToken, getStudentQuiz);
+router.post('/quiz/:id/submit', verifyToken, submitStudentQuiz);
 router.post('/execute', verifyToken, executeCode);
 router.post('/submit-exercise', verifyToken, submitExercise);
 

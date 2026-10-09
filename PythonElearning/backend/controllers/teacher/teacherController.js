@@ -436,19 +436,52 @@ const getTeacherQuizzes = async (req, res) => {
       include: { Lessons: { include: { Chapters: true } } }
     });
 
+    const quizAttempts = quizzes.length
+      ? await prisma.testAttempts.findMany({
+          where: { ExerciseID: { in: quizzes.map((quiz) => quiz.ExerciseID) } },
+          select: { ExerciseID: true, UserID: true, TotalScore: true }
+        })
+      : [];
+    const attemptsByQuiz = new Map();
+
+    for (const attempt of quizAttempts) {
+      const attempts = attemptsByQuiz.get(attempt.ExerciseID) || [];
+      attempts.push(attempt);
+      attemptsByQuiz.set(attempt.ExerciseID, attempts);
+    }
+
     const formattedQuizzes = quizzes.map(q => {
       const config = q.QuizConfig ? JSON.parse(q.QuizConfig) : {
         questionCount: 0, passScore: 70, 
         types: { multipleChoice: 0, trueFalse: 0, fillIn: 0 },
         tags: []
       };
+      const attempts = attemptsByQuiz.get(q.ExerciseID) || [];
+      const passScore = Number(config.passScore);
+      const studentIds = new Set(attempts.map((attempt) => attempt.UserID));
+      const attemptScores = attempts.map((attempt) => {
+        const score = Number(attempt.TotalScore);
+        const scoreScale = score > 10 ? 100 : Number(q.MaxScore) || 10;
+        return scoreScale > 0 ? Math.min((score / scoreScale) * 100, 100) : 0;
+      });
+      const averageScore = attemptScores.length
+        ? attemptScores.reduce((sum, score) => sum + score, 0) / attemptScores.length
+        : 0;
+      const passCount = Number.isFinite(passScore)
+        ? attemptScores.filter((score) => score >= passScore).length
+        : 0;
+
       return {
         id: q.ExerciseID,
         title: q.Title,
         chapter: q.Lessons?.Chapters?.Title || 'Ch 1',
         timeLimit: q.TimeLimitMinutes,
         status: q.Status,
-        config: config
+        config,
+        studentCount: studentIds.size,
+        attemptCount: attempts.length,
+        averageScore: Number(averageScore.toFixed(1)),
+        passRate: attempts.length ? Number(((passCount / attempts.length) * 100).toFixed(1)) : 0
       };
     });
 
@@ -472,7 +505,7 @@ const createQuiz = async (req, res) => {
         Type: 'Quiz',
         TimeLimitMinutes: 15,
         DifficultyLevel: 2, // Mặc định Medium
-        MaxScore: 100,
+        MaxScore: 10,
         Status: 'Draft',
         QuizConfig: JSON.stringify({
           questionCount: 0, passScore: 70, 
