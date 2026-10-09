@@ -417,6 +417,317 @@ const getAllExercises = async (req, res) => {
   }
 };
 
+const getStudentQuizzes = async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    const enrollments = await prisma.enrollments.findMany({
+      where: { UserID: studentId, Status: 'Active' },
+      select: { CourseID: true }
+    });
+    const courseIds = enrollments.map((enrollment) => enrollment.CourseID);
+
+    if (!courseIds.length) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const quizzes = await prisma.exercises.findMany({
+      where: {
+        Type: 'Quiz',
+        Status: 'Published',
+        Lessons: { Chapters: { CourseID: { in: courseIds } } }
+      },
+      select: {
+        ExerciseID: true,
+        Title: true,
+        TimeLimitMinutes: true,
+        QuizConfig: true,
+        Lessons: {
+          select: {
+            Chapters: {
+              select: {
+                Title: true,
+                Courses: { select: { Title: true } }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { ExerciseID: 'asc' }
+    });
+
+    const attemptCounts = quizzes.length
+      ? await prisma.testAttempts.groupBy({
+          by: ['ExerciseID'],
+          where: { ExerciseID: { in: quizzes.map((quiz) => quiz.ExerciseID) } },
+          _count: { _all: true }
+        })
+      : [];
+    const attemptsByQuiz = new Map(
+      attemptCounts.map((item) => [item.ExerciseID, item._count._all])
+    );
+
+    const data = quizzes.map((quiz) => {
+      const config = quiz.QuizConfig ? JSON.parse(quiz.QuizConfig) : {};
+      const questions = Array.isArray(config.questions) ? config.questions : [];
+      const tags = Array.isArray(config.tags)
+        ? config.tags.filter((tag) => typeof tag === 'string' && tag.trim())
+        : [];
+
+      return {
+        id: quiz.ExerciseID,
+        title: quiz.Title,
+        courseName: quiz.Lessons?.Chapters?.Courses?.Title || '',
+        chapterName: quiz.Lessons?.Chapters?.Title || '',
+        tags,
+        questionCount: questions.length,
+        timeLimit: quiz.TimeLimitMinutes,
+        passScore: typeof config.passScore === 'number' && Number.isFinite(config.passScore) ? config.passScore : null,
+        maxScore: 10,
+        attemptCount: attemptsByQuiz.get(quiz.ExerciseID) || 0
+      };
+    });
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error('Lỗi lấy danh sách bài kiểm tra học viên:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const getStudentQuiz = async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    const quizId = Number.parseInt(req.params.id, 10);
+
+    if (!Number.isInteger(quizId) || quizId <= 0) {
+      return res.status(400).json({ success: false, message: 'ID bài kiểm tra không hợp lệ' });
+    }
+
+    const enrollments = await prisma.enrollments.findMany({
+      where: { UserID: studentId, Status: 'Active' },
+      select: { CourseID: true }
+    });
+    const courseIds = enrollments.map((enrollment) => enrollment.CourseID);
+
+    if (!courseIds.length) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy bài kiểm tra' });
+    }
+
+    const quiz = await prisma.exercises.findFirst({
+      where: {
+        ExerciseID: quizId,
+        Type: 'Quiz',
+        Status: 'Published',
+        Lessons: { Chapters: { CourseID: { in: courseIds } } }
+      },
+      select: {
+        ExerciseID: true,
+        Title: true,
+        TimeLimitMinutes: true,
+        QuizConfig: true,
+        Lessons: {
+          select: {
+            Chapters: {
+              select: {
+                Title: true,
+                Courses: { select: { Title: true } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!quiz) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy bài kiểm tra' });
+    }
+
+    const config = quiz.QuizConfig ? JSON.parse(quiz.QuizConfig) : {};
+    const questions = Array.isArray(config.questions) ? config.questions : [];
+
+    res.status(200).json({
+      success: true,
+      data: {
+        id: quiz.ExerciseID,
+        title: quiz.Title,
+        courseName: quiz.Lessons?.Chapters?.Courses?.Title || '',
+        chapterName: quiz.Lessons?.Chapters?.Title || '',
+        timeLimit: quiz.TimeLimitMinutes,
+        maxScore: 10,
+        passScore: typeof config.passScore === 'number' && Number.isFinite(config.passScore) ? config.passScore : null,
+        questions: questions.map((question) => ({
+          id: String(question.id),
+          type: question.type,
+          text: question.text,
+          points: Number(question.points) || 0,
+          options: Array.isArray(question.options)
+            ? question.options.map((option) => ({
+                id: String(option.id),
+                text: option.text
+              }))
+            : []
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Lỗi lấy chi tiết bài kiểm tra học viên:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const submitStudentQuiz = async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    const quizId = Number.parseInt(req.params.id, 10);
+    const { answers } = req.body;
+
+    if (!Number.isInteger(quizId) || quizId <= 0 || !Array.isArray(answers)) {
+      return res.status(400).json({ success: false, message: 'Dữ liệu nộp bài không hợp lệ' });
+    }
+
+    const enrollments = await prisma.enrollments.findMany({
+      where: { UserID: studentId, Status: 'Active' },
+      select: { CourseID: true }
+    });
+    const courseIds = enrollments.map((enrollment) => enrollment.CourseID);
+
+    const quiz = courseIds.length
+      ? await prisma.exercises.findFirst({
+          where: {
+            ExerciseID: quizId,
+            Type: 'Quiz',
+            Status: 'Published',
+            Lessons: { Chapters: { CourseID: { in: courseIds } } }
+          },
+          select: {
+            ExerciseID: true,
+            QuizConfig: true
+          }
+        })
+      : null;
+
+    if (!quiz) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy bài kiểm tra' });
+    }
+
+    const config = quiz.QuizConfig ? JSON.parse(quiz.QuizConfig) : {};
+    const questions = Array.isArray(config.questions) ? config.questions : [];
+
+    if (!questions.length) {
+      return res.status(409).json({ success: false, message: 'Bài kiểm tra chưa có câu hỏi' });
+    }
+
+    const answersByQuestion = new Map(
+      answers.map((answer) => [String(answer.questionId), answer.value])
+    );
+    const questionIds = questions.map((question) => String(question.id));
+
+    if (
+      answersByQuestion.size !== answers.length ||
+      answersByQuestion.size !== questions.length ||
+      questionIds.some((questionId) => !answersByQuestion.has(questionId)) ||
+      new Set(questionIds).size !== questionIds.length
+    ) {
+      return res.status(400).json({ success: false, message: 'Vui lòng trả lời đầy đủ câu hỏi' });
+    }
+
+    let pointsEarned = 0;
+    let totalPoints = 0;
+
+    for (const question of questions) {
+      const answer = answersByQuestion.get(String(question.id));
+      const points = Number(question.points);
+      if (!Number.isFinite(points) || points < 0) {
+        return res.status(409).json({ success: false, message: 'Cấu hình điểm của bài kiểm tra không hợp lệ' });
+      }
+
+      totalPoints += points;
+      let isCorrect = false;
+
+      if (question.type === 'multipleChoice') {
+        const selectedOption = answer === null
+          ? null
+          : Array.isArray(question.options)
+          ? question.options.find((option) => String(option.id) === String(answer))
+          : null;
+        if (answer !== null && !selectedOption) {
+          return res.status(400).json({ success: false, message: 'Đáp án gửi lên không hợp lệ' });
+        }
+        isCorrect = selectedOption?.isCorrect === true;
+      } else if (question.type === 'trueFalse') {
+        if (answer !== null && typeof answer !== 'boolean') {
+          return res.status(400).json({ success: false, message: 'Đáp án đúng/sai không hợp lệ' });
+        }
+        if (typeof question.correctAnswer !== 'boolean') {
+          return res.status(400).json({ success: false, message: 'Đáp án đúng/sai không hợp lệ' });
+        }
+        isCorrect = answer === question.correctAnswer;
+      } else if (question.type === 'fillIn') {
+        if (answer !== null && typeof answer !== 'string') {
+          return res.status(400).json({ success: false, message: 'Đáp án điền vào không hợp lệ' });
+        }
+        if (typeof question.correctAnswer !== 'string') {
+          return res.status(400).json({ success: false, message: 'Đáp án điền vào không hợp lệ' });
+        }
+        isCorrect = typeof answer === 'string' &&
+          answer.trim().toLocaleLowerCase() === question.correctAnswer.trim().toLocaleLowerCase();
+      } else {
+        return res.status(409).json({ success: false, message: 'Bài kiểm tra có loại câu hỏi chưa được hỗ trợ' });
+      }
+
+      if (isCorrect) pointsEarned += points;
+    }
+
+    if (totalPoints <= 0) {
+      return res.status(409).json({ success: false, message: 'Bài kiểm tra chưa có tổng điểm hợp lệ' });
+    }
+
+    const percentage = Number(((pointsEarned / totalPoints) * 100).toFixed(2));
+    const maxScore = 10;
+    const scoreEarned = Number(((maxScore * percentage) / 100).toFixed(2));
+    const passScore = typeof config.passScore === 'number' && Number.isFinite(config.passScore)
+      ? config.passScore
+      : null;
+    const passed = passScore !== null
+      ? percentage >= passScore
+      : false;
+    const submittedAt = new Date();
+
+    const [, attempt] = await prisma.$transaction([
+      prisma.exercises.update({
+        where: { ExerciseID: quiz.ExerciseID },
+        data: { MaxScore: maxScore }
+      }),
+      prisma.testAttempts.create({
+        data: {
+          UserID: studentId,
+          ExerciseID: quiz.ExerciseID,
+          StartTime: submittedAt,
+          EndTime: submittedAt,
+          TotalScore: scoreEarned
+        }
+      })
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        attemptId: attempt.AttemptID,
+        pointsEarned,
+        totalPoints,
+        percentage,
+        maxScore,
+        scoreEarned,
+        passScore,
+        passed
+      }
+    });
+  } catch (error) {
+    console.error('Lỗi nộp bài kiểm tra học viên:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -634,5 +945,8 @@ module.exports = {
   enrollCourse,
   getExerciseDetail,
   executeCode,
-  submitExercise,    
+  submitExercise,
+  getStudentQuizzes,
+  getStudentQuiz,
+  submitStudentQuiz
 };
