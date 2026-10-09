@@ -453,9 +453,18 @@ const getTeacherQuizzes = async (req, res) => {
     const formattedQuizzes = quizzes.map(q => {
       const config = q.QuizConfig ? JSON.parse(q.QuizConfig) : {
         questionCount: 0, passScore: 70, 
-        types: { multipleChoice: 0, trueFalse: 0, fillIn: 0 },
+        types: { multipleChoice: 0, trueFalse: 0, fillIn: 0, essay: 0 },
         tags: []
       };
+      config.types = {
+        multipleChoice: 0,
+        trueFalse: 0,
+        fillIn: 0,
+        essay: 0,
+        ...(config.types || {})
+      };
+      config.tags = Array.isArray(config.tags) ? config.tags : [];
+      config.questions = Array.isArray(config.questions) ? config.questions : [];
       const attempts = attemptsByQuiz.get(q.ExerciseID) || [];
       const passScore = Number(config.passScore);
       const studentIds = new Set(attempts.map((attempt) => attempt.UserID));
@@ -509,7 +518,7 @@ const createQuiz = async (req, res) => {
         Status: 'Draft',
         QuizConfig: JSON.stringify({
           questionCount: 0, passScore: 70, 
-          types: { multipleChoice: 0, trueFalse: 0, fillIn: 0 },
+          types: { multipleChoice: 0, trueFalse: 0, fillIn: 0, essay: 0 },
           tags: []
         })
       }
@@ -559,6 +568,337 @@ const getEnrollments = async (req, res) => {
   }
 };
 
+const getEssayAttempts = async (req, res) => {
+  try {
+    const teacherId = req.user.userId;
+    const attempts = await prisma.testAttempts.findMany({
+      where: {
+        GradingStatus: { in: ['Pending', 'Draft'] },
+        Exercises: {
+          Type: 'Quiz',
+          Lessons: { Chapters: { Courses: { InstructorID: teacherId } } }
+        },
+        Submissions: {
+          some: { TestQuestions: { QuestionType: 'essay' } }
+        }
+      },
+      include: {
+        Users: { select: { FullName: true, Email: true, StudentID: true } },
+        Exercises: {
+          select: {
+            Title: true,
+            MaxScore: true,
+            Lessons: {
+              select: {
+                Title: true,
+                Chapters: {
+                  select: {
+                    Title: true,
+                    Courses: { select: { Title: true } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Submissions: {
+          where: { TestQuestions: { QuestionType: 'essay' } },
+          orderBy: { SubmissionID: 'asc' },
+          include: {
+            TestQuestions: { select: { Content: true, Points: true } }
+          }
+        }
+      },
+      orderBy: { StartTime: 'asc' }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: attempts.map((attempt) => ({
+        attemptId: attempt.AttemptID,
+        status: attempt.GradingStatus,
+        submittedAt: attempt.EndTime || attempt.StartTime,
+        currentScore: Number(attempt.TotalScore),
+        maxScore: Number(attempt.Exercises.MaxScore) || 10,
+        feedback: attempt.InstructorFeedback || '',
+        student: {
+          name: attempt.Users.FullName,
+          email: attempt.Users.Email,
+          studentId: attempt.Users.StudentID
+        },
+        quizTitle: attempt.Exercises.Title,
+        courseName: attempt.Exercises.Lessons?.Chapters?.Courses?.Title || '',
+        chapterName: attempt.Exercises.Lessons?.Chapters?.Title || '',
+        lessonName: attempt.Exercises.Lessons?.Title || '',
+        questions: attempt.Submissions.map((submission) => {
+          let answer = submission.CodeSubmitted;
+          if (typeof answer === 'string') {
+            try {
+              const snapshot = JSON.parse(answer);
+              if (snapshot && typeof snapshot === 'object') answer = snapshot.answer ?? '';
+            } catch (error) {
+              if (!(error instanceof SyntaxError)) throw error;
+            }
+          }
+          return {
+            submissionId: submission.SubmissionID,
+            question: submission.TestQuestions.Content,
+            answer: typeof answer === 'string' ? answer : '',
+            maxPoints: Number(submission.TestQuestions.Points),
+            score: Number(submission.ScoreEarned)
+          };
+        })
+      }))
+    });
+  } catch (error) {
+    console.error('Lỗi lấy danh sách bài tự luận chờ chấm:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const gradeEssayAttempt = async (req, res) => {
+  try {
+    const teacherId = req.user.userId;
+    const attemptId = Number.parseInt(req.params.attemptId, 10);
+    const { action, feedback, questions } = req.body;
+
+    if (!Number.isInteger(attemptId) || attemptId <= 0) {
+      return res.status(400).json({ success: false, message: 'Lượt làm bài không hợp lệ' });
+    }
+    if (!['Draft', 'Published'].includes(action) || typeof feedback !== 'string' || !Array.isArray(questions)) {
+      return res.status(400).json({ success: false, message: 'Dữ liệu chấm bài không hợp lệ' });
+    }
+
+    const attempt = await prisma.testAttempts.findFirst({
+      where: {
+        AttemptID: attemptId,
+        GradingStatus: { in: ['Pending', 'Draft'] },
+        Exercises: {
+          Type: 'Quiz',
+          Lessons: { Chapters: { Courses: { InstructorID: teacherId } } }
+        },
+        Submissions: { some: { TestQuestions: { QuestionType: 'essay' } } }
+      },
+      include: {
+        Exercises: { select: { MaxScore: true, QuizConfig: true } },
+        Submissions: {
+          include: { TestQuestions: { select: { QuestionType: true, Points: true } } }
+        }
+      }
+    });
+
+    if (!attempt) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy lượt tự luận cần chấm' });
+    }
+
+    const essaySubmissions = attempt.Submissions.filter(
+      (submission) => submission.TestQuestions.QuestionType === 'essay'
+    );
+    const submittedGrades = new Map();
+    for (const grade of questions) {
+      const submissionId = Number(grade.submissionId);
+      const score = Number(grade.score);
+      const submission = essaySubmissions.find((item) => item.SubmissionID === submissionId);
+      if (
+        !submission ||
+        submittedGrades.has(submissionId) ||
+        !Number.isFinite(score) ||
+        score < 0 ||
+        score > Number(submission.TestQuestions.Points)
+      ) {
+        return res.status(400).json({ success: false, message: 'Điểm câu tự luận không hợp lệ' });
+      }
+      submittedGrades.set(submissionId, score);
+    }
+
+    if (action === 'Published' && essaySubmissions.some((submission) => !submittedGrades.has(submission.SubmissionID))) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập điểm cho tất cả câu tự luận trước khi công bố' });
+    }
+
+    const savedAttempt = await prisma.$transaction(async (tx) => {
+      for (const [submissionId, score] of submittedGrades) {
+        const submission = essaySubmissions.find((item) => item.SubmissionID === submissionId);
+        await tx.submissions.update({
+          where: { SubmissionID: submissionId },
+          data: {
+            ScoreEarned: score,
+            IsCorrect: score >= Number(submission.TestQuestions.Points)
+          }
+        });
+      }
+
+      const updatedSubmissions = submittedGrades.size
+        ? await tx.submissions.findMany({
+            where: { AttemptID: attemptId },
+            include: { TestQuestions: { select: { Points: true } } }
+          })
+        : attempt.Submissions;
+      const totalPossiblePoints = updatedSubmissions.reduce(
+        (sum, submission) => sum + Number(submission.TestQuestions.Points),
+        0
+      );
+      const earnedPoints = updatedSubmissions.reduce(
+        (sum, submission) => sum + Number(submission.ScoreEarned),
+        0
+      );
+      const maxScore = Number(attempt.Exercises.MaxScore) || 10;
+      const totalScore = totalPossiblePoints > 0
+        ? Number(((earnedPoints / totalPossiblePoints) * maxScore).toFixed(2))
+        : 0;
+
+      return tx.testAttempts.update({
+        where: { AttemptID: attemptId },
+        data: {
+          TotalScore: totalScore,
+          InstructorFeedback: feedback,
+          GradingStatus: action
+        },
+        select: { AttemptID: true, TotalScore: true, GradingStatus: true }
+      });
+    });
+
+    res.status(200).json({
+      success: true,
+      message: action === 'Published' ? 'Đã công bố kết quả chấm bài' : 'Đã lưu bản nháp chấm bài',
+      data: {
+        attemptId: savedAttempt.AttemptID,
+        totalScore: Number(savedAttempt.TotalScore),
+        gradingStatus: savedAttempt.GradingStatus
+      }
+    });
+  } catch (error) {
+    console.error('Lỗi lưu kết quả chấm tự luận:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const getNotificationCourses = async (req, res) => {
+  try {
+    const courses = await prisma.courses.findMany({
+      where: { InstructorID: req.user.userId },
+      select: {
+        CourseID: true,
+        Title: true,
+        _count: { select: { Enrollments: { where: { Status: 'Active' } } } }
+      },
+      orderBy: { Title: 'asc' }
+    });
+    res.status(200).json({
+      success: true,
+      data: courses.map((course) => ({
+        id: course.CourseID,
+        title: course.Title,
+        activeStudentCount: course._count.Enrollments
+      }))
+    });
+  } catch (error) {
+    console.error('Lỗi lấy khóa học gửi thông báo:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const getNotificationRecipients = async (req, res) => {
+  try {
+    const courseId = Number.parseInt(req.params.courseId, 10);
+    const course = await prisma.courses.findFirst({
+      where: { CourseID: courseId, InstructorID: req.user.userId },
+      select: { CourseID: true }
+    });
+    if (!course) return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học' });
+
+    const enrollments = await prisma.enrollments.findMany({
+      where: { CourseID: courseId, Status: 'Active' },
+      select: {
+        UserID: true,
+        Users: { select: { FullName: true, Email: true, StudentID: true } }
+      },
+      orderBy: { Users: { FullName: 'asc' } }
+    });
+    res.status(200).json({
+      success: true,
+      data: enrollments.map((enrollment) => ({
+        id: enrollment.UserID,
+        name: enrollment.Users.FullName,
+        email: enrollment.Users.Email,
+        studentId: enrollment.Users.StudentID
+      }))
+    });
+  } catch (error) {
+    console.error('Lỗi lấy danh sách người nhận thông báo:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const sendCourseNotification = async (req, res) => {
+  try {
+    const courseId = Number(req.body.courseId);
+    const { title, message, recipientIds, notificationType, actionLabel, actionUrl } = req.body;
+    const allowedNotificationTypes = ['AI', 'Quiz', 'Lesson', 'Exercise', 'Course', 'General'];
+    const hasActionLabel = actionLabel !== undefined && actionLabel !== null;
+    const hasActionUrl = actionUrl !== undefined && actionUrl !== null;
+    const hasAction = hasActionLabel && hasActionUrl;
+    if (
+      !Number.isInteger(courseId) ||
+      typeof title !== 'string' ||
+      !title.trim() ||
+      title.trim().length > 200 ||
+      typeof message !== 'string' ||
+      !message.trim() ||
+      !Array.isArray(recipientIds) ||
+      !allowedNotificationTypes.includes(notificationType) ||
+      (hasActionLabel !== hasActionUrl) ||
+      (hasAction && (
+        typeof actionLabel !== 'string' ||
+        !actionLabel.trim() ||
+        actionLabel.trim().length > 100 ||
+        typeof actionUrl !== 'string' ||
+        actionUrl.length > 500 ||
+        !/^\/student(?:\/[a-zA-Z0-9_-]+)*(?:\?[a-zA-Z0-9_=&%-]*)?$/.test(actionUrl)
+      ))
+    ) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập nội dung, loại thông báo và người nhận hợp lệ' });
+    }
+
+    const course = await prisma.courses.findFirst({
+      where: { CourseID: courseId, InstructorID: req.user.userId },
+      select: { CourseID: true }
+    });
+    if (!course) return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học' });
+
+    const userIds = [...new Set(recipientIds.map(Number))];
+    if (!userIds.length || userIds.some((userId) => !Number.isInteger(userId) || userId <= 0)) {
+      return res.status(400).json({ success: false, message: 'Vui lòng chọn ít nhất một học viên hợp lệ' });
+    }
+
+    const activeEnrollments = await prisma.enrollments.findMany({
+      where: { CourseID: courseId, Status: 'Active', UserID: { in: userIds } },
+      select: { UserID: true }
+    });
+    if (activeEnrollments.length !== userIds.length) {
+      return res.status(400).json({ success: false, message: 'Danh sách người nhận có học viên không thuộc lớp đang hoạt động' });
+    }
+
+    const created = await prisma.notifications.createMany({
+      data: userIds.map((userId) => ({
+        UserID: userId,
+        Title: title.trim(),
+        Message: message.trim(),
+        NotificationType: notificationType,
+        ActionLabel: hasAction ? actionLabel.trim() : null,
+        ActionUrl: hasAction ? actionUrl : null
+      }))
+    });
+    res.status(201).json({
+      success: true,
+      message: `Đã gửi thông báo đến ${created.count} học viên`,
+      data: { recipientCount: created.count }
+    });
+  } catch (error) {
+    console.error('Lỗi gửi thông báo khóa học:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
 // PUT: DUYỆT HOẶC TỪ CHỐI ĐĂNG KÝ
 const updateEnrollmentStatus = async (req, res) => {
   try {
@@ -595,5 +935,10 @@ module.exports = {
   getTeacherQuizzes, 
   createQuiz,
   getEnrollments,
-  updateEnrollmentStatus
+  updateEnrollmentStatus,
+  getEssayAttempts,
+  gradeEssayAttempt,
+  getNotificationCourses,
+  getNotificationRecipients,
+  sendCourseNotification
 };

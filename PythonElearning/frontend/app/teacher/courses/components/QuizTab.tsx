@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 // ==========================================
 // 1. KHAI BÁO TYPE CHO TYPESCRIPT
 // ==========================================
-type QuestionType = 'multipleChoice' | 'trueFalse' | 'fillIn';
+type QuestionType = 'multipleChoice' | 'trueFalse' | 'fillIn' | 'essay';
 
 interface Option {
   id: string;
@@ -25,7 +25,7 @@ interface Question {
 interface QuizConfig {
   questionCount: number;
   passScore: number;
-  types: { multipleChoice: number; trueFalse: number; fillIn: number; };
+  types: { multipleChoice: number; trueFalse: number; fillIn: number; essay: number; };
   tags: string[];
   questions: Question[]; // Mảng chứa chi tiết các câu hỏi
 }
@@ -143,7 +143,15 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
       newQuestion.correctAnswer = '';
     }
 
-    const newConfig = { ...activeQuiz.config };
+    const newConfig = {
+      ...activeQuiz.config,
+      types: {
+        multipleChoice: activeQuiz.config.types?.multipleChoice ?? 0,
+        trueFalse: activeQuiz.config.types?.trueFalse ?? 0,
+        fillIn: activeQuiz.config.types?.fillIn ?? 0,
+        essay: activeQuiz.config.types?.essay ?? 0
+      }
+    };
     
     // Đảm bảo mảng questions luôn tồn tại trước khi push
     if (!newConfig.questions) {
@@ -170,7 +178,15 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
   // Xóa câu hỏi
   const deleteQuestion = (qIndex: number) => {
     if (!activeQuiz) return;
-    const newConfig = { ...activeQuiz.config };
+    const newConfig = {
+      ...activeQuiz.config,
+      types: {
+        multipleChoice: activeQuiz.config.types?.multipleChoice ?? 0,
+        trueFalse: activeQuiz.config.types?.trueFalse ?? 0,
+        fillIn: activeQuiz.config.types?.fillIn ?? 0,
+        essay: activeQuiz.config.types?.essay ?? 0
+      }
+    };
     const deletedType = newConfig.questions[qIndex].type;
     
     newConfig.questions.splice(qIndex, 1);
@@ -246,6 +262,7 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
                 <span className="text-blue-600">Trắc nghiệm ×{quiz.config.types.multipleChoice}</span>
                 <span className="text-blue-600">Đúng/Sai ×{quiz.config.types.trueFalse}</span>
                 <span className="text-purple-600">Điền vào ×{quiz.config.types.fillIn}</span>
+                <span className="text-amber-600">Tự luận ×{quiz.config.types.essay ?? 0}</span>
               </div>
 
               <div className="flex justify-between items-center h-10">
@@ -363,6 +380,7 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
             <button onClick={() => addQuestion('multipleChoice')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Trắc nghiệm</button>
             <button onClick={() => addQuestion('trueFalse')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Đúng/Sai</button>
             <button onClick={() => addQuestion('fillIn')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Điền vào</button>
+            <button onClick={() => addQuestion('essay')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Tự luận</button>
           </div>
         </div>
 
@@ -373,8 +391,8 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
               {/* Header Câu Hỏi */}
               <div className="flex items-center gap-3 mb-4">
                 <span className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold flex items-center justify-center text-sm">{index + 1}</span>
-                <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${q.type === 'multipleChoice' ? 'bg-blue-50 text-blue-600' : q.type === 'trueFalse' ? 'bg-emerald-50 text-emerald-600' : 'bg-purple-50 text-purple-600'}`}>
-                  {q.type === 'multipleChoice' ? 'Trắc nghiệm' : q.type === 'trueFalse' ? 'Đúng/Sai' : 'Điền vào'}
+                <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${q.type === 'multipleChoice' ? 'bg-blue-50 text-blue-600' : q.type === 'trueFalse' ? 'bg-emerald-50 text-emerald-600' : q.type === 'essay' ? 'bg-amber-50 text-amber-600' : 'bg-purple-50 text-purple-600'}`}>
+                  {q.type === 'multipleChoice' ? 'Trắc nghiệm' : q.type === 'trueFalse' ? 'Đúng/Sai' : q.type === 'essay' ? 'Tự luận' : 'Điền vào'}
                 </span>
                 <div className="flex items-center gap-2 ml-2">
                    <span className="text-xs text-gray-400 font-medium">Điểm:</span>
@@ -436,6 +454,10 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
                     <span className="text-sm font-semibold text-gray-500">Đáp án chính xác:</span>
                     <input type="text" value={q.correctAnswer as string} onChange={(e) => updateQuestion(index, 'correctAnswer', e.target.value)} placeholder="Nhập từ/cụm từ đáp án..." className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
+                )}
+
+                {q.type === 'essay' && (
+                  <p className="text-sm text-amber-700">Câu trả lời sẽ do giảng viên chấm sau khi sinh viên nộp bài.</p>
                 )}
               </div>
             </div>

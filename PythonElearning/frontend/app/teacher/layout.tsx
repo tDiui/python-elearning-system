@@ -45,6 +45,8 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
   const menuItems = [
     { title: 'Dashboard', path: '/teacher/dashboard', icon: '⊞' },
     { title: 'Course Management', path: '/teacher/courses', icon: '📚' },
+    { title: 'Chấm bài tự luận', path: '/teacher/essay-grading', icon: '📝' },
+    { title: 'Gửi thông báo', path: '/teacher/notifications', icon: '🔔' },
     { title: 'Quản lý đăng ký', path: '/teacher/enrollments', icon: '👥' },
     { title: 'Analytics', path: '/teacher/analytics', icon: '📊' },
     { title: 'Profile', path: '/teacher/profile', icon: '👤' },

@@ -601,7 +601,17 @@ const submitStudentQuiz = async (req, res) => {
           },
           select: {
             ExerciseID: true,
-            QuizConfig: true
+            LessonID: true,
+            TopicID: true,
+            MaxScore: true,
+            QuizConfig: true,
+            Lessons: {
+              select: {
+                Title: true,
+                Chapters: { select: { CourseID: true, Title: true } },
+                LessonTopics: { select: { TopicID: true } }
+              }
+            }
           }
         })
       : null;
@@ -633,6 +643,7 @@ const submitStudentQuiz = async (req, res) => {
 
     let pointsEarned = 0;
     let totalPoints = 0;
+    const gradedAnswers = [];
 
     for (const question of questions) {
       const answer = answersByQuestion.get(String(question.id));
@@ -643,6 +654,7 @@ const submitStudentQuiz = async (req, res) => {
 
       totalPoints += points;
       let isCorrect = false;
+      let selectedAnswerContent = null;
 
       if (question.type === 'multipleChoice') {
         const selectedOption = answer === null
@@ -654,6 +666,7 @@ const submitStudentQuiz = async (req, res) => {
           return res.status(400).json({ success: false, message: 'Đáp án gửi lên không hợp lệ' });
         }
         isCorrect = selectedOption?.isCorrect === true;
+        selectedAnswerContent = selectedOption?.text ?? null;
       } else if (question.type === 'trueFalse') {
         if (answer !== null && typeof answer !== 'boolean') {
           return res.status(400).json({ success: false, message: 'Đáp án đúng/sai không hợp lệ' });
@@ -662,6 +675,7 @@ const submitStudentQuiz = async (req, res) => {
           return res.status(400).json({ success: false, message: 'Đáp án đúng/sai không hợp lệ' });
         }
         isCorrect = answer === question.correctAnswer;
+        selectedAnswerContent = answer;
       } else if (question.type === 'fillIn') {
         if (answer !== null && typeof answer !== 'string') {
           return res.status(400).json({ success: false, message: 'Đáp án điền vào không hợp lệ' });
@@ -671,11 +685,24 @@ const submitStudentQuiz = async (req, res) => {
         }
         isCorrect = typeof answer === 'string' &&
           answer.trim().toLocaleLowerCase() === question.correctAnswer.trim().toLocaleLowerCase();
+        selectedAnswerContent = answer;
+      } else if (question.type === 'essay') {
+        if (answer !== null && typeof answer !== 'string') {
+          return res.status(400).json({ success: false, message: 'Câu trả lời tự luận không hợp lệ' });
+        }
+        selectedAnswerContent = answer;
       } else {
         return res.status(409).json({ success: false, message: 'Bài kiểm tra có loại câu hỏi chưa được hỗ trợ' });
       }
 
       if (isCorrect) pointsEarned += points;
+      gradedAnswers.push({
+        question,
+        answer,
+        isCorrect,
+        pointsEarned: isCorrect ? points : 0,
+        selectedAnswerContent
+      });
     }
 
     if (totalPoints <= 0) {
@@ -685,6 +712,7 @@ const submitStudentQuiz = async (req, res) => {
     const percentage = Number(((pointsEarned / totalPoints) * 100).toFixed(2));
     const maxScore = 10;
     const scoreEarned = Number(((maxScore * percentage) / 100).toFixed(2));
+    const hasEssay = gradedAnswers.some((item) => item.question.type === 'essay');
     const passScore = typeof config.passScore === 'number' && Number.isFinite(config.passScore)
       ? config.passScore
       : null;
@@ -692,38 +720,456 @@ const submitStudentQuiz = async (req, res) => {
       ? percentage >= passScore
       : false;
     const submittedAt = new Date();
+    const courseId = quiz.Lessons?.Chapters?.CourseID;
 
-    const [, attempt] = await prisma.$transaction([
-      prisma.exercises.update({
+    if (!courseId || !courseIds.includes(courseId)) {
+      return res.status(409).json({ success: false, message: 'Không xác định được khóa học của bài kiểm tra' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      let topicId = quiz.TopicID || quiz.Lessons?.LessonTopics[0]?.TopicID;
+
+      if (!topicId) {
+        const topic = await tx.knowledgeTopics.findFirst({
+          where: { CourseID: courseId },
+          select: { TopicID: true }
+        });
+        topicId = topic?.TopicID;
+      }
+
+      if (!topicId) {
+        const topic = await tx.knowledgeTopics.create({
+          data: {
+            CourseID: courseId,
+            TopicName: (quiz.Lessons?.Chapters?.Title || 'General Programming').slice(0, 150),
+            Description: quiz.Lessons?.Title || 'Chủ đề của bài kiểm tra'
+          },
+          select: { TopicID: true }
+        });
+        topicId = topic.TopicID;
+      }
+
+      const questionSubmissions = [];
+      const usedQuestionIds = new Set();
+      const questionRecords = await tx.testQuestions.findMany({
         where: { ExerciseID: quiz.ExerciseID },
-        data: { MaxScore: maxScore }
-      }),
-      prisma.testAttempts.create({
+        include: { Answers: { select: { AnswerID: true, Content: true, IsCorrect: true } } },
+        orderBy: { QuestionID: 'asc' }
+      });
+
+      for (const item of gradedAnswers) {
+        const question = item.question;
+        const questionData = {
+          Content: String(question.text || ''),
+          QuestionType: question.type,
+          Points: Number(question.points),
+          TopicID: topicId
+        };
+        let databaseQuestion = questionRecords.find((record) =>
+          !usedQuestionIds.has(record.QuestionID) &&
+          record.Content === questionData.Content &&
+          record.QuestionType === questionData.QuestionType &&
+          Number(record.Points) === questionData.Points
+        );
+
+        if (!databaseQuestion) {
+          databaseQuestion = await tx.testQuestions.create({
+            data: {
+              ExerciseID: quiz.ExerciseID,
+              ...questionData
+            },
+            include: { Answers: { select: { AnswerID: true, Content: true, IsCorrect: true } } }
+          });
+          questionRecords.push(databaseQuestion);
+        }
+        usedQuestionIds.add(databaseQuestion.QuestionID);
+
+        const answerEntries = question.type === 'multipleChoice'
+          ? (Array.isArray(question.options) ? question.options : []).map((option) => ({
+              key: String(option.id),
+              content: String(option.text || ''),
+              isCorrect: option.isCorrect === true
+            }))
+          : question.type === 'trueFalse'
+            ? [
+                { key: 'true', content: 'Đúng', isCorrect: question.correctAnswer === true },
+                { key: 'false', content: 'Sai', isCorrect: question.correctAnswer === false }
+              ]
+            : question.type === 'fillIn'
+              ? [{ key: 'correct', content: String(question.correctAnswer), isCorrect: true }]
+              : [];
+        const usedAnswerIds = new Set();
+        const databaseAnswerIds = new Map();
+
+        for (const entry of answerEntries) {
+          let savedAnswer = databaseQuestion.Answers.find((existingAnswer) =>
+            !usedAnswerIds.has(existingAnswer.AnswerID) &&
+            existingAnswer.Content === entry.content &&
+            existingAnswer.IsCorrect === entry.isCorrect
+          );
+          if (!savedAnswer) {
+            savedAnswer = await tx.answers.create({
+              data: {
+                QuestionID: databaseQuestion.QuestionID,
+                Content: entry.content,
+                IsCorrect: entry.isCorrect
+              },
+              select: { AnswerID: true }
+            });
+            databaseQuestion.Answers.push({
+              ...savedAnswer,
+              Content: entry.content,
+              IsCorrect: entry.isCorrect
+            });
+          }
+          usedAnswerIds.add(savedAnswer.AnswerID);
+          databaseAnswerIds.set(entry.key, savedAnswer.AnswerID);
+        }
+
+        let selectedAnswerId = null;
+        if (question.type === 'multipleChoice' && item.answer !== null) {
+          selectedAnswerId = databaseAnswerIds.get(String(item.answer));
+        } else if (question.type === 'trueFalse' && item.answer !== null) {
+          selectedAnswerId = databaseAnswerIds.get(String(item.answer));
+        }
+
+        questionSubmissions.push({
+          QuestionID: databaseQuestion.QuestionID,
+          SelectedAnswerID: selectedAnswerId || null,
+          CodeSubmitted: JSON.stringify({
+            question: String(question.text || ''),
+            type: question.type,
+            answer: item.selectedAnswerContent
+          }),
+          IsCorrect: item.isCorrect,
+          ScoreEarned: item.pointsEarned
+        });
+      }
+
+      await tx.exercises.update({
+        where: { ExerciseID: quiz.ExerciseID },
+        data: { MaxScore: maxScore, TopicID: topicId }
+      });
+
+      const attempt = await tx.testAttempts.create({
         data: {
           UserID: studentId,
           ExerciseID: quiz.ExerciseID,
           StartTime: submittedAt,
           EndTime: submittedAt,
-          TotalScore: scoreEarned
+          TotalScore: scoreEarned,
+          GradingStatus: hasEssay ? 'Pending' : 'Published'
         }
-      })
-    ]);
+      });
+
+      for (const submission of questionSubmissions) {
+        await tx.submissions.create({
+          data: {
+            AttemptID: attempt.AttemptID,
+            ...submission
+          }
+        });
+      }
+
+      await tx.learningActivities.create({
+        data: {
+          UserID: studentId,
+          CourseID: courseId,
+          LessonID: quiz.LessonID,
+          ExerciseID: quiz.ExerciseID,
+          ActionType: 'Submit Quiz',
+          TimeSpentSeconds: 0,
+          Score: scoreEarned,
+          IsCompleted: true,
+          CreatedAt: submittedAt
+        }
+      });
+
+      return attempt;
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        attemptId: result.AttemptID,
+        pendingReview: hasEssay,
+        ...(hasEssay ? {} : {
+          pointsEarned,
+          totalPoints,
+          percentage,
+          maxScore,
+          scoreEarned,
+          passScore,
+          passed
+        })
+      }
+    });
+  } catch (error) {
+    console.error('Lỗi nộp bài kiểm tra học viên:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const getStudentResults = async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    const attempts = await prisma.testAttempts.findMany({
+      where: { UserID: studentId },
+      include: {
+        Exercises: {
+          select: {
+            Title: true,
+            Type: true,
+            MaxScore: true,
+            QuizConfig: true,
+            Lessons: {
+              select: {
+                Title: true,
+                Chapters: {
+                  select: {
+                    Title: true,
+                    Courses: { select: { Title: true } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        Submissions: { select: { IsCorrect: true } }
+      },
+      orderBy: { StartTime: 'desc' }
+    });
+
+    const results = attempts.map((attempt) => {
+      const exercise = attempt.Exercises;
+      const isQuiz = exercise.Type === 'Quiz';
+      const gradingStatus = isQuiz ? attempt.GradingStatus : null;
+      const awaitingEssayGrade = isQuiz && ['Pending', 'Draft'].includes(gradingStatus);
+      const configuredMaxScore = Number(exercise.MaxScore) || 10;
+      const rawScore = Number(attempt.TotalScore) || 0;
+      const isLegacyHundredPointQuiz = isQuiz && rawScore > 10;
+      const maxScore = isQuiz ? 10 : configuredMaxScore;
+      const score = awaitingEssayGrade ? null : isLegacyHundredPointQuiz
+        ? Number((rawScore / 10).toFixed(2))
+        : rawScore;
+      const percentage = awaitingEssayGrade ? null : isLegacyHundredPointQuiz
+        ? Math.min(rawScore, 100)
+        : maxScore > 0
+          ? Math.min(Number(((score / maxScore) * 100).toFixed(2)), 100)
+          : 0;
+      let passed = null;
+
+      if (awaitingEssayGrade) {
+        passed = null;
+      } else if (isQuiz) {
+        const config = exercise.QuizConfig ? JSON.parse(exercise.QuizConfig) : {};
+        const passScore = typeof config.passScore === 'number' && Number.isFinite(config.passScore)
+          ? config.passScore
+          : null;
+        if (passScore !== null) passed = percentage >= passScore;
+      } else if (attempt.Submissions.length) {
+        passed = attempt.Submissions.some((submission) => submission.IsCorrect);
+      }
+
+      return {
+        attemptId: attempt.AttemptID,
+        title: exercise.Title,
+        type: isQuiz ? 'Quiz' : 'Practice',
+        courseName: exercise.Lessons?.Chapters?.Courses?.Title || '',
+        chapterName: exercise.Lessons?.Chapters?.Title || '',
+        lessonName: exercise.Lessons?.Title || '',
+        startTime: attempt.StartTime,
+        endTime: attempt.EndTime,
+        score,
+        maxScore,
+        percentage,
+        passed,
+        gradingStatus
+      };
+    });
+    const visibleResults = results.filter((result) => result.percentage !== null);
+    const scoredResults = visibleResults.filter((result) => result.passed !== null);
+    const passedCount = scoredResults.filter((result) => result.passed).length;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          attemptCount: results.length,
+          averagePercentage: visibleResults.length
+            ? Number((visibleResults.reduce((sum, result) => sum + result.percentage, 0) / visibleResults.length).toFixed(1))
+            : 0,
+          passedCount,
+          passRate: scoredResults.length
+            ? Number(((passedCount / scoredResults.length) * 100).toFixed(1))
+            : 0
+        },
+        results
+      }
+    });
+  } catch (error) {
+    console.error('Lỗi lấy kết quả học tập:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const getStudentQuizResultDetail = async (req, res) => {
+  try {
+    const studentId = req.user.userId;
+    const attemptId = Number.parseInt(req.params.attemptId, 10);
+
+    if (!Number.isInteger(attemptId) || attemptId <= 0) {
+      return res.status(400).json({ success: false, message: 'Lượt làm bài không hợp lệ' });
+    }
+
+    const attempt = await prisma.testAttempts.findFirst({
+      where: { AttemptID: attemptId, UserID: studentId },
+      include: {
+        Exercises: {
+          select: { Title: true, Type: true }
+        },
+        Submissions: {
+          orderBy: { SubmissionID: 'asc' },
+          include: {
+            Answers: {
+              select: { AnswerID: true, Content: true }
+            },
+            TestQuestions: {
+              select: {
+                Content: true,
+                QuestionType: true,
+                Points: true,
+                Explanation: true,
+                Answers: {
+                  select: { AnswerID: true, Content: true, IsCorrect: true },
+                  orderBy: { AnswerID: 'asc' }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!attempt || attempt.Exercises.Type !== 'Quiz') {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy kết quả bài kiểm tra' });
+    }
+    if (
+      ['Pending', 'Draft'].includes(attempt.GradingStatus) &&
+      attempt.Submissions.some((submission) => submission.TestQuestions.QuestionType === 'essay')
+    ) {
+      return res.status(409).json({ success: false, message: 'Kết quả đang chờ giảng viên chấm và công bố' });
+    }
+
+    const questions = attempt.Submissions.map((submission) => {
+      let savedAnswer = submission.CodeSubmitted;
+      let snapshot = null;
+
+      if (typeof savedAnswer === 'string') {
+        try {
+          const parsed = JSON.parse(savedAnswer);
+          if (parsed && typeof parsed === 'object') {
+            snapshot = parsed;
+            savedAnswer = parsed.answer ?? null;
+          }
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+        }
+      }
+
+      return {
+        question: snapshot?.question || submission.TestQuestions.Content,
+        type: snapshot?.type || submission.TestQuestions.QuestionType,
+        points: Number(submission.TestQuestions.Points),
+        scoreEarned: Number(submission.ScoreEarned),
+        isCorrect: submission.IsCorrect,
+        selectedAnswer: savedAnswer ?? submission.Answers?.Content ?? null,
+        correctAnswers: submission.TestQuestions.Answers
+          .filter((answer) => answer.IsCorrect)
+          .map((answer) => answer.Content),
+        options: submission.TestQuestions.Answers.map((answer) => ({
+          content: answer.Content,
+          isCorrect: answer.IsCorrect,
+          isSelected: answer.AnswerID === submission.Answers?.AnswerID ||
+            (!submission.Answers && typeof savedAnswer === 'string' && answer.Content === savedAnswer)
+        })),
+        explanation: submission.TestQuestions.Explanation
+      };
+    });
 
     res.status(200).json({
       success: true,
       data: {
         attemptId: attempt.AttemptID,
-        pointsEarned,
-        totalPoints,
-        percentage,
-        maxScore,
-        scoreEarned,
-        passScore,
-        passed
+        title: attempt.Exercises.Title,
+        totalScore: Number(attempt.TotalScore),
+        instructorFeedback: attempt.InstructorFeedback || '',
+        questions
       }
     });
   } catch (error) {
-    console.error('Lỗi nộp bài kiểm tra học viên:', error);
+    console.error('Lỗi lấy chi tiết kết quả bài kiểm tra:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const getStudentNotifications = async (req, res) => {
+  try {
+    const notifications = await prisma.notifications.findMany({
+      where: { UserID: req.user.userId },
+      orderBy: { CreatedAt: 'desc' },
+      select: {
+        NotificationID: true,
+        Title: true,
+        Message: true,
+        IsRead: true,
+        CreatedAt: true,
+        NotificationType: true,
+        ActionLabel: true,
+        ActionUrl: true
+      }
+    });
+    res.status(200).json({ success: true, data: notifications });
+  } catch (error) {
+    console.error('Lỗi lấy thông báo học viên:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const markAllStudentNotificationsRead = async (req, res) => {
+  try {
+    const updated = await prisma.notifications.updateMany({
+      where: { UserID: req.user.userId, IsRead: false },
+      data: { IsRead: true }
+    });
+    res.status(200).json({
+      success: true,
+      message: 'Đã đánh dấu tất cả thông báo đã đọc',
+      data: { updatedCount: updated.count }
+    });
+  } catch (error) {
+    console.error('Lỗi đánh dấu tất cả thông báo đã đọc:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+};
+
+const markStudentNotificationRead = async (req, res) => {
+  try {
+    const notificationId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(notificationId) || notificationId <= 0) {
+      return res.status(400).json({ success: false, message: 'Thông báo không hợp lệ' });
+    }
+
+    const updated = await prisma.notifications.updateMany({
+      where: { NotificationID: notificationId, UserID: req.user.userId },
+      data: { IsRead: true }
+    });
+    if (!updated.count) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy thông báo' });
+    }
+    res.status(200).json({ success: true, message: 'Đã đánh dấu đã đọc' });
+  } catch (error) {
+    console.error('Lỗi cập nhật trạng thái thông báo:', error);
     res.status(500).json({ success: false, message: 'Lỗi server' });
   }
 };
@@ -948,5 +1394,10 @@ module.exports = {
   submitExercise,
   getStudentQuizzes,
   getStudentQuiz,
-  submitStudentQuiz
+  submitStudentQuiz,
+  getStudentResults,
+  getStudentQuizResultDetail,
+  getStudentNotifications,
+  markAllStudentNotificationsRead,
+  markStudentNotificationRead
 };
