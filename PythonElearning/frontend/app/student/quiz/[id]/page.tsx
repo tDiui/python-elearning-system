@@ -12,7 +12,7 @@ interface QuizOption {
 
 interface QuizQuestion {
   id: string;
-  type: 'multipleChoice' | 'trueFalse' | 'fillIn';
+  type: 'multipleChoice' | 'trueFalse' | 'fillIn' | 'essay';
   text: string;
   points: number;
   options: QuizOption[];
@@ -30,6 +30,7 @@ interface QuizDetail {
 }
 
 interface QuizResult {
+  pendingReview: boolean;
   pointsEarned: number;
   totalPoints: number;
   percentage: number;
@@ -178,13 +179,21 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
 
       {result ? (
         <section aria-live="polite" className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <CheckCircle2 className={`mx-auto mb-4 h-12 w-12 ${result.passed ? 'text-emerald-500' : 'text-amber-500'}`} />
-          <h2 className="text-xl font-extrabold text-gray-900">{result.passed ? 'Bạn đã đạt bài kiểm tra' : 'Bài kiểm tra đã được ghi nhận'}</h2>
-          <p className="mt-3 text-3xl font-extrabold text-blue-700">{result.percentage}%</p>
-          <p className="mt-2 text-sm text-gray-500">
-            {result.pointsEarned}/{result.totalPoints} điểm câu hỏi · {result.scoreEarned}/{result.maxScore} điểm bài kiểm tra
-          </p>
-          {result.passScore !== null && <p className="mt-1 text-xs text-gray-500">Điểm đạt: {result.passScore}%</p>}
+          <CheckCircle2 className={`mx-auto mb-4 h-12 w-12 ${result.pendingReview ? 'text-blue-500' : result.passed ? 'text-emerald-500' : 'text-amber-500'}`} />
+          <h2 className="text-xl font-extrabold text-gray-900">
+            {result.pendingReview ? 'Đã nộp bài, đang chờ giảng viên chấm tự luận' : result.passed ? 'Bạn đã đạt bài kiểm tra' : 'Bài kiểm tra đã được ghi nhận'}
+          </h2>
+          {result.pendingReview ? (
+            <p className="mt-3 text-sm text-gray-500">Điểm và nhận xét sẽ hiển thị sau khi giảng viên công bố kết quả.</p>
+          ) : (
+            <>
+              <p className="mt-3 text-3xl font-extrabold text-blue-700">{result.percentage}%</p>
+              <p className="mt-2 text-sm text-gray-500">
+                {result.pointsEarned}/{result.totalPoints} điểm câu hỏi · {result.scoreEarned}/{result.maxScore} điểm bài kiểm tra
+              </p>
+              {result.passScore !== null && <p className="mt-1 text-xs text-gray-500">Điểm đạt: {result.passScore}%</p>}
+            </>
+          )}
           <button onClick={() => router.push('/student/quiz')} className="mt-6 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700">
             Quay lại danh sách
           </button>
@@ -240,7 +249,7 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
                     </label>
                   ))}
                 </div>
-              ) : (
+              ) : question.type === 'fillIn' ? (
                 <div className="pl-11">
                   <input
                     type="text"
@@ -248,6 +257,16 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
                     onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
                     placeholder="Nhập câu trả lời"
                     className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+              ) : (
+                <div className="pl-11">
+                  <textarea
+                    value={typeof answers[question.id] === 'string' ? answers[question.id] as string : ''}
+                    onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
+                    placeholder="Nhập câu trả lời tự luận"
+                    rows={5}
+                    className="w-full resize-y rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
                 </div>
               )}

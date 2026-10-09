@@ -5,6 +5,7 @@ const {
   getTeacherDashboard, getTeacherLayoutData, getTeacherCourseManagement,
   createCourse, createChapter, createLesson,
   updateChapter, deleteChapter, updateLesson, deleteLesson, createExercise, deleteExercise , getTeacherExercises, updateExerciseDetails, getTeacherQuizzes, createQuiz, getEnrollments, updateEnrollmentStatus
+  , getEssayAttempts, gradeEssayAttempt, getNotificationCourses, getNotificationRecipients, sendCourseNotification
 } = require('../../controllers/teacher/teacherController');
 
 router.get('/dashboard', verifyToken, getTeacherDashboard);
@@ -30,6 +31,11 @@ router.post('/quiz', verifyToken, createQuiz);
 
 router.get('/enrollments', verifyToken, getEnrollments);
 router.put('/enrollments/:id/status', verifyToken, updateEnrollmentStatus);
+router.get('/essay-attempts', verifyToken, getEssayAttempts);
+router.put('/essay-attempts/:attemptId/grade', verifyToken, gradeEssayAttempt);
+router.get('/notification-courses', verifyToken, getNotificationCourses);
+router.get('/notification-courses/:courseId/students', verifyToken, getNotificationRecipients);
+router.post('/notifications', verifyToken, sendCourseNotification);
 
 
 module.exports = router;

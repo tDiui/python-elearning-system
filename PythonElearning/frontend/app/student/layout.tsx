@@ -48,6 +48,15 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     fetchStudentProfile();
   }, []);
 
+  useEffect(() => {
+    const updateNotificationCount = (event: Event) => {
+      const detail = (event as CustomEvent<{ unreadCount: number }>).detail;
+      if (typeof detail?.unreadCount === 'number') setNotificationCount(detail.unreadCount);
+    };
+    window.addEventListener('student-notifications-updated', updateNotificationCount);
+    return () => window.removeEventListener('student-notifications-updated', updateNotificationCount);
+  }, []);
+
   // Danh sách các menu điều hướng
   const menuItems = [
     { title: 'Dashboard', path: '/student/dashboard', icon: '⊞' },

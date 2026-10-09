@@ -221,13 +221,16 @@ model LessonTopics {
 }
 
 model Notifications {
-  NotificationID Int      @id(map: "PK__Notifica__20CF2E323C578508") @default(autoincrement())
-  UserID         Int
-  Title          String   @db.NVarChar(200)
-  Message        String   @db.NVarChar(Max)
-  IsRead         Boolean  @default(false, map: "DF__Notificat__IsRea__2A164134")
-  CreatedAt      DateTime @default(dbgenerated("sysdatetime()"), map: "DF__Notificat__Creat__2B0A656D")
-  Users          Users    @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_Notifications_User")
+  NotificationID   Int      @id(map: "PK__Notifica__20CF2E323C578508") @default(autoincrement())
+  UserID           Int
+  Title            String   @db.NVarChar(200)
+  Message          String   @db.NVarChar(Max)
+  IsRead           Boolean  @default(false, map: "DF__Notificat__IsRea__2A164134")
+  CreatedAt        DateTime @default(dbgenerated("sysdatetime()"), map: "DF__Notificat__Creat__2B0A656D")
+  NotificationType String?  @db.NVarChar(30)
+  ActionLabel      String?  @db.NVarChar(100)
+  ActionUrl        String?  @db.NVarChar(500)
+  Users            Users    @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_Notifications_User")
 }
 
 model RefreshTokens {
@@ -304,6 +307,8 @@ model TestAttempts {
   StartTime   DateTime
   EndTime     DateTime?
   TotalScore  Decimal       @default(0.00, map: "DF__TestAttem__Total__6B24EA82") @db.Decimal(5, 2)
+  InstructorFeedback String? @db.NVarChar(Max)
+  GradingStatus String? @db.NVarChar(20)
   Submissions Submissions[]
   Exercises   Exercises     @relation(fields: [ExerciseID], references: [ExerciseID], onUpdate: NoAction, map: "FK_TestAttempts_Exercise")
   Users       Users         @relation(fields: [UserID], references: [UserID], onUpdate: NoAction, map: "FK_TestAttempts_User")
