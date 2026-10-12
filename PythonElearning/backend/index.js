@@ -62,3 +62,6 @@ app.listen(PORT, () => {
 
 const teacherRoutes = require('./routes/teacher/teacherRoutes');
 app.use('/api/teacher', teacherRoutes);
+
+const adminUserRoutes = require('./routes/admin/userRoutes');
+app.use('/api/admin', adminUserRoutes);

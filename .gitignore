@@ -33,6 +33,11 @@ out/
 .env.local
 .env.*.local
 
+# Encrypted runtime settings
+PythonElearning/backend/data/system-settings.enc
+PythonElearning/backend/data/system-settings.enc.*.tmp
+PythonElearning/backend/data/system-settings.enc.previous
+
 # npm cache directory
 .npm
 *.tgz
