@@ -79,8 +79,14 @@ const login = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản!' });
     }
 
+    if (!user.IsActive) {
+      return res.status(403).json({ success: false, message: 'Tài khoản đã bị khóa.' });
+    }
+
     // So sánh mật khẩu người dùng nhập với mật khẩu đã mã hóa trong DB
-    const isMatch = await bcrypt.compare(password, user.PasswordHash);
+    const isMatch = user.PasswordHash
+      ? await bcrypt.compare(password, user.PasswordHash)
+      : false;
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Sai mật khẩu!' });
     }

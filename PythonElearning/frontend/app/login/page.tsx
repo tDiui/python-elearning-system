@@ -58,10 +58,10 @@ export default function LoginPage() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
 
-        // Chuyển hướng vào trang Dashboard sau 1 giây
+        // Chuyển đến khu vực phù hợp với vai trò sau 1 giây
         setTimeout(() => {
           if (normalizedRole.includes('admin') || normalizedRole.includes('quan tri vien')) {
-            router.push('/admin/dashboard');
+            router.push('/admin/users');
           } else if (normalizedRole.includes('giang vien') || normalizedRole.includes('teacher')) {
             router.push('/teacher/dashboard');
           } else {

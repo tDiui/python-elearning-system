@@ -89,7 +89,8 @@ const getCourseData = async (req, res) => {
     const activeEnrollment = await prisma.enrollments.findFirst({
       where: {
         UserID: studentId,
-        Status: 'Active'
+        Status: 'Active',
+        Courses: { Status: { not: 'Archived' } }
       },
       include: {
         Courses: {
@@ -213,7 +214,10 @@ const getLessonDetail = async (req, res) => {
       where: { LessonID: lessonId },
       include: {
         Chapters: { 
-          select: { Title: true } 
+          select: {
+            Title: true,
+            Courses: { select: { Status: true } }
+          }
         },
         Exercises: { // Kéo danh sách bài tập dựa vào LessonID
           select: {
@@ -228,6 +232,9 @@ const getLessonDetail = async (req, res) => {
 
     if (!lesson) {
       return res.status(404).json({ success: false, message: 'Bài học không tồn tại' });
+    }
+    if (lesson.Chapters?.Courses?.Status === 'Archived') {
+      return res.status(404).json({ success: false, message: 'Khóa học này hiện không khả dụng.' });
     }
 
     const data = {
@@ -279,8 +286,10 @@ const getExploreData = async (req, res) => {
 
     // 2. Lấy danh sách Khóa học
     const courses = await prisma.courses.findMany({
+      where: { Status: { not: 'Archived' } },
       include: {
-        Users: { select: { FullName: true, Email: true } } // Lấy tên người dạy
+        Users: { select: { FullName: true, Email: true } }, // Lấy tên người dạy
+        Categories: { select: { CategoryName: true } }
       }
     });
 
@@ -300,7 +309,7 @@ const getExploreData = async (req, res) => {
           title: c.Title,
           description: c.Description,
           instructor: c.Users?.FullName || c.Users?.Email || 'Chưa cập nhật',
-          category: "Python cơ bản" 
+          category: c.Categories.CategoryName
         }))
       }
     });
@@ -317,6 +326,14 @@ const enrollCourse = async (req, res) => {
     const { courseId } = req.body;
 
     if (!courseId) return res.status(400).json({ success: false, message: 'Thiếu ID khóa học' });
+
+    const course = await prisma.courses.findUnique({
+      where: { CourseID: parseInt(courseId) },
+      select: { Status: true }
+    });
+    if (!course || course.Status === 'Archived') {
+      return res.status(404).json({ success: false, message: 'Khóa học không tồn tại hoặc hiện không khả dụng.' });
+    }
 
     // Kiểm tra xem đã đăng ký chưa
     const existingEnrollment = await prisma.enrollments.findFirst({
@@ -357,11 +374,19 @@ const getExerciseDetail = async (req, res) => {
     const exercise = await prisma.exercises.findUnique({
       where: { ExerciseID: exerciseId },
       include: {
-        KnowledgeTopics: { select: { TopicName: true } }
+        KnowledgeTopics: { select: { TopicName: true } },
+        Lessons: {
+          select: {
+            Chapters: { select: { Courses: { select: { Status: true } } } }
+          }
+        }
       }
     });
 
     if (!exercise) return res.status(404).json({ success: false, message: 'Bài tập không tồn tại' });
+    if (exercise.Lessons?.Chapters?.Courses?.Status === 'Archived') {
+      return res.status(404).json({ success: false, message: 'Khóa học này hiện không khả dụng.' });
+    }
 
     // Parse TestCases JSON từ SQL Server (Giả định Giảng viên lưu dạng [{input: "...", expected: "..."}])
     let testCases = [];
@@ -393,7 +418,11 @@ const getAllExercises = async (req, res) => {
   try {
       const exercises = await prisma.exercises.findMany({
       where: {
-        Type: 'Practice'
+        Type: 'Practice',
+        OR: [
+          { Lessons: null },
+          { Lessons: { Chapters: { Courses: { Status: { not: 'Archived' } } } } }
+        ]
       },
       include: {
         KnowledgeTopics: { select: { TopicName: true } }
@@ -421,7 +450,11 @@ const getStudentQuizzes = async (req, res) => {
   try {
     const studentId = req.user.userId;
     const enrollments = await prisma.enrollments.findMany({
-      where: { UserID: studentId, Status: 'Active' },
+      where: {
+        UserID: studentId,
+        Status: 'Active',
+        Courses: { Status: { not: 'Archived' } }
+      },
       select: { CourseID: true }
     });
     const courseIds = enrollments.map((enrollment) => enrollment.CourseID);
@@ -434,7 +467,12 @@ const getStudentQuizzes = async (req, res) => {
       where: {
         Type: 'Quiz',
         Status: 'Published',
-        Lessons: { Chapters: { CourseID: { in: courseIds } } }
+        Lessons: {
+          Chapters: {
+            CourseID: { in: courseIds },
+            Courses: { Status: { not: 'Archived' } }
+          }
+        }
       },
       select: {
         ExerciseID: true,
@@ -504,7 +542,11 @@ const getStudentQuiz = async (req, res) => {
     }
 
     const enrollments = await prisma.enrollments.findMany({
-      where: { UserID: studentId, Status: 'Active' },
+      where: {
+        UserID: studentId,
+        Status: 'Active',
+        Courses: { Status: { not: 'Archived' } }
+      },
       select: { CourseID: true }
     });
     const courseIds = enrollments.map((enrollment) => enrollment.CourseID);
@@ -518,7 +560,12 @@ const getStudentQuiz = async (req, res) => {
         ExerciseID: quizId,
         Type: 'Quiz',
         Status: 'Published',
-        Lessons: { Chapters: { CourseID: { in: courseIds } } }
+        Lessons: {
+          Chapters: {
+            CourseID: { in: courseIds },
+            Courses: { Status: { not: 'Archived' } }
+          }
+        }
       },
       select: {
         ExerciseID: true,
@@ -586,7 +633,11 @@ const submitStudentQuiz = async (req, res) => {
     }
 
     const enrollments = await prisma.enrollments.findMany({
-      where: { UserID: studentId, Status: 'Active' },
+      where: {
+        UserID: studentId,
+        Status: 'Active',
+        Courses: { Status: { not: 'Archived' } }
+      },
       select: { CourseID: true }
     });
     const courseIds = enrollments.map((enrollment) => enrollment.CourseID);
@@ -597,7 +648,12 @@ const submitStudentQuiz = async (req, res) => {
             ExerciseID: quizId,
             Type: 'Quiz',
             Status: 'Published',
-            Lessons: { Chapters: { CourseID: { in: courseIds } } }
+            Lessons: {
+              Chapters: {
+                CourseID: { in: courseIds },
+                Courses: { Status: { not: 'Archived' } }
+              }
+            }
           },
           select: {
             ExerciseID: true,
@@ -1286,11 +1342,22 @@ const submitExercise = async (req, res) => {
         Lessons: {
           select: {
             Title: true,
-            Chapters: { select: { Title: true } }
+            Chapters: {
+              select: {
+                Title: true,
+                CourseID: true,
+                Courses: { select: { Status: true } }
+              }
+            }
           }
         }
       }
     });
+
+    if (!exercise) return res.status(404).json({ success: false, message: 'Bài tập không tồn tại.' });
+    if (exercise.Lessons?.Chapters?.Courses?.Status === 'Archived') {
+      return res.status(409).json({ success: false, message: 'Khóa học này đã bị khóa, không thể nộp bài.' });
+    }
     
     const scoreEarned = isPassed ? (exercise?.MaxScore || 10) : 0;
 
