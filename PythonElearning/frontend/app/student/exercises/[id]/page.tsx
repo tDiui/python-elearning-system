@@ -15,6 +15,7 @@ interface TestCase {
 
 interface ExerciseDetail {
   id: number;
+  courseId: number | null;
   title: string;
   topicName: string;
   type: string;
@@ -102,6 +103,11 @@ export default function ExercisePage({ params }: { params: Promise<{ id: string 
 // HÀM XỬ LÝ NỘP BÀI (SUBMIT) VÀ LƯU DATABASE
   const handleSubmit = async () => {
     // 1. Kiểm tra điều kiện nộp bài
+    if (!exercise?.courseId) {
+      alert("Không xác định được khóa học của bài tập.");
+      return;
+    }
+
     if (testResults.length === 0) {
       alert("Vui lòng bấm 'Run Code' để chạy thử trước khi nộp bài!");
       return;
@@ -125,7 +131,7 @@ export default function ExercisePage({ params }: { params: Promise<{ id: string 
         },
         body: JSON.stringify({
           exerciseId: id, 
-          courseId: 1,    // <--- THÊM DÒNG NÀY VÀO (Tạm thời truyền mã khóa học là 1)
+          courseId: exercise.courseId,
           code: code,     
           isPassed: true  
         })

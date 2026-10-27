@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation'; // Hook lấy đường dẫn hiện tại
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import AccountMenu from '../../components/AccountMenu';
 
 const subscribeToHydration = () => () => {};
 const getClientHydrationSnapshot = () => true;
@@ -125,9 +126,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
              </Link>
           </div>
           <div className="flex items-center gap-3 pt-4 border-t border-gray-100 px-2">
-            <div className="w-8 h-8 bg-blue-100 text-blue-600 font-bold rounded-full flex items-center justify-center text-sm uppercase shrink-0">
-              {userName?.charAt(0) || 'S'}
-            </div>
+            <AccountMenu
+              fullName={userName}
+              roleLabel="Sinh viên"
+              onProfileUpdated={(account) => setUserName(account.fullName)}
+              menuPlacement="top-start"
+            />
             <div className="overflow-hidden">
               <p className="text-sm font-bold text-gray-900 truncate">{userName}</p>
               <p className="text-[11px] text-gray-500">Student</p>
@@ -156,9 +160,11 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                 <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>
               )}
             </button>
-            <div className="w-8 h-8 bg-blue-100 text-blue-600 font-bold rounded-full flex items-center justify-center text-sm uppercase">
-              {userName?.charAt(0) || 'M'}
-            </div>
+            <AccountMenu
+              fullName={userName}
+              roleLabel="Sinh viên"
+              onProfileUpdated={(account) => setUserName(account.fullName)}
+            />
           </div>
         </header>
 

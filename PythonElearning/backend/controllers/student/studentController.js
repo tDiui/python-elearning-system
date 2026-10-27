@@ -1,11 +1,12 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { updateTopicProgress } = require('../../services/learningProgressService');
 
 const getDashboardData = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [user, stats, topicProgress, totalLessonsLearned, completedExercises, unreadNotifications] = await Promise.all([
+    const [user, stats, topicProgress, completedLessonActivities, activityStats, completedExercises, unreadNotifications, activeEnrollment] = await Promise.all([
       prisma.users.findUnique({
         where: { UserID: userId },
         select: { FullName: true }
@@ -22,12 +23,18 @@ const getDashboardData = async (req, res) => {
         },
         orderBy: { LastUpdated: 'desc' }
       }),
-      prisma.learningActivities.count({
+      prisma.learningActivities.findMany({
         where: {
           UserID: userId,
           IsCompleted: true,
           LessonID: { not: null }
-        }
+        },
+        select: { LessonID: true }
+      }),
+      prisma.learningActivities.aggregate({
+        where: { UserID: userId },
+        _avg: { Score: true },
+        _sum: { TimeSpentSeconds: true }
       }),
       prisma.learningActivities.count({
         where: {
@@ -41,38 +48,171 @@ const getDashboardData = async (req, res) => {
           UserID: userId,
           IsRead: false
         }
+      }),
+      prisma.enrollments.findFirst({
+        where: {
+          UserID: userId,
+          Status: 'Active',
+          Courses: { Status: { not: 'Archived' } }
+        },
+        include: {
+          Courses: {
+            select: {
+              CourseID: true,
+              Title: true,
+              Chapters: {
+                orderBy: { ChapterID: 'asc' },
+                select: {
+                  Title: true,
+                  Lessons: {
+                    orderBy: { LessonID: 'asc' },
+                    select: { LessonID: true, Title: true, DurationMinutes: true, Difficulty: true }
+                  }
+                }
+              }
+            }
+          }
+        }
       })
     ]);
 
-    const totalStudySeconds = stats.reduce((sum, item) => sum + (Number(item.TotalTimeSpentSeconds) || 0), 0);
-    const averageScore = stats.length
+    const statsStudySeconds = stats.reduce((sum, item) => sum + (Number(item.TotalTimeSpentSeconds) || 0), 0);
+    const totalStudySeconds = Number(activityStats._sum?.TimeSpentSeconds) || statsStudySeconds;
+    const statsAverageScore = stats.length
       ? stats.reduce((sum, item) => sum + (Number(item.AverageScore) || 0), 0) / stats.length
+      : 0;
+    const averageScore = activityStats._avg?.Score === null || activityStats._avg?.Score === undefined
+      ? statsAverageScore
+      : Number(activityStats._avg?.Score) || 0;
+    const overallMastery = topicProgress.length
+      ? topicProgress.reduce((sum, item) => sum + (Number(item.MasteryLevel) || 0), 0) / topicProgress.length
       : 0;
 
     const knowledgeMap = topicProgress.map((item) => {
-      const score = Math.min(Math.max(Number(item.AverageScore) || 0, 0), 100);
+      const score = Math.min(Math.max(Number(item.MasteryLevel) || 0, 0), 100);
       return {
         name: item.KnowledgeTopics?.TopicName || 'Uncategorized Topic',
-        score,
-        color: score >= 70 ? 'bg-blue-600' : score >= 50 ? 'bg-amber-500' : 'bg-red-500'
+        score: Number(score.toFixed(2)),
+        color: score >= 70 ? 'bg-blue-600' : score >= 50 ? 'bg-amber-500' : 'bg-red-500',
+        warning: score < 50 ? 'Cần luyện tập' : undefined
       };
     });
 
+    let currentCourse = null;
+    let learningPath = [];
+    let learningPathTitle = null;
+    let learningPathSource = null;
+
+    if (activeEnrollment?.Courses) {
+      const course = activeEnrollment.Courses;
+      const [courseActivities, activePath] = await Promise.all([
+        prisma.learningActivities.findMany({
+          where: {
+            UserID: userId,
+            CourseID: course.CourseID,
+            IsCompleted: true,
+            LessonID: { not: null }
+          },
+          select: { LessonID: true }
+        }),
+        prisma.learningPaths.findFirst({
+          where: {
+            UserID: userId,
+            CourseID: course.CourseID,
+            Status: 'Active'
+          },
+          orderBy: { CreatedAt: 'desc' },
+          include: {
+            AIGenerations: { select: { Status: true } },
+            LearningPathItems: {
+              orderBy: { OrderIndex: 'asc' },
+              include: {
+                Lessons: {
+                  select: { LessonID: true, Title: true, Difficulty: true, DurationMinutes: true }
+                },
+                Exercises: {
+                  select: { ExerciseID: true, Title: true, DifficultyLevel: true, TimeLimitMinutes: true }
+                }
+              }
+            }
+          }
+        })
+      ]);
+
+      const lessons = course.Chapters.flatMap((chapter) =>
+        chapter.Lessons.map((lesson) => ({ ...lesson, chapterTitle: chapter.Title }))
+      );
+      const completedLessonIds = new Set(
+        courseActivities
+          .map((activity) => activity.LessonID)
+          .filter((lessonId) => lessonId !== null)
+      );
+      const nextLesson = lessons.find((lesson) => !completedLessonIds.has(lesson.LessonID));
+      const completedCourseLessons = lessons.filter((lesson) => completedLessonIds.has(lesson.LessonID)).length;
+
+      currentCourse = {
+        courseId: course.CourseID,
+        courseName: course.Title,
+        chapterInfo: nextLesson?.chapterTitle || (lessons.length ? 'Đã hoàn thành các bài học hiện có' : 'Khóa học chưa có bài học'),
+        progressPercent: lessons.length
+          ? Number(((completedCourseLessons / lessons.length) * 100).toFixed(1))
+          : 0,
+        completedLessons: completedCourseLessons,
+        totalLessons: lessons.length,
+        nextLessonId: nextLesson?.LessonID || null
+      };
+
+      if (activePath) {
+        learningPathTitle = activePath.Title || 'Lộ trình học tập cá nhân hóa';
+        learningPathSource = activePath.AIGenerations.Status === 'Fallback_Used' ? 'Fallback' : 'AI';
+        learningPath = activePath.LearningPathItems.map((item) => {
+          const lesson = item.Lessons;
+          const exercise = item.Exercises;
+          const isLesson = Boolean(lesson);
+          const difficulty = isLesson
+            ? lesson.Difficulty || 'Medium'
+            : !exercise || exercise.DifficultyLevel <= 1
+              ? 'Easy'
+              : exercise.DifficultyLevel === 2
+                ? 'Medium'
+                : 'Hard';
+
+          return {
+            id: item.PathItemID,
+            title: lesson?.Title || exercise?.Title || 'Nội dung học tập',
+            difficulty,
+            reason: item.RecommendationReason || 'Nội dung được đề xuất trong lộ trình học tập.',
+            durationMinutes: lesson?.DurationMinutes || exercise?.TimeLimitMinutes || 0,
+            isCompleted: item.IsCompleted,
+            isLocked: false,
+            targetType: isLesson ? 'Lesson' : 'Exercise',
+            targetId: lesson?.LessonID || exercise?.ExerciseID || null
+          };
+        });
+        learningPath = learningPath.map((item, index) => ({
+          ...item,
+          isLocked: index > 0 && !learningPath[index - 1].isCompleted
+        }));
+      }
+    }
+
     const dashboardData = {
       fullName: user?.FullName || 'Student',
-      overallMastery: Number(averageScore.toFixed(2)),
-      totalLessonsLearned: totalLessonsLearned || 0,
+      overallMastery: Number(overallMastery.toFixed(2)),
+      totalLessonsLearned: new Set(completedLessonActivities.map((activity) => activity.LessonID)).size,
       avgScore: Number(averageScore.toFixed(2)),
       studyTimeHours: Number((totalStudySeconds / 3600).toFixed(1)),
       completedExercises: completedExercises || 0,
       notificationCount: unreadNotifications || 0,
-      currentCourse: null,
-      learningPath: [],
+      currentCourse,
+      learningPath,
+      learningPathTitle,
+      learningPathSource,
       aiInsight: null,
       knowledgeMap
     };
 
-    res.status(200).json({ success: true, data: dashboardData });
+    return res.status(200).json({ success: true, data: dashboardData });
   } catch (error) {
     console.error('Lỗi lấy data Dashboard:', error);
     res.status(500).json({ success: false, message: 'Lỗi server' });
@@ -190,12 +330,145 @@ const getCourseData = async (req, res) => {
 const getProfileData = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const profileData = null;
+    const [topicProgress, learningStats, activities] = await Promise.all([
+      prisma.studentTopicProgress.findMany({
+        where: { UserID: userId },
+        include: {
+          KnowledgeTopics: {
+            select: { TopicName: true }
+          }
+        },
+        orderBy: { LastUpdated: 'desc' }
+      }),
+      prisma.studentLearningStats.findMany({
+        where: { UserID: userId },
+        select: { TotalTimeSpentSeconds: true, AverageScore: true }
+      }),
+      prisma.learningActivities.findMany({
+        where: {
+          UserID: userId,
+          CreatedAt: { gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) }
+        },
+        orderBy: { CreatedAt: 'desc' },
+        take: 5000,
+        select: { CreatedAt: true, TimeSpentSeconds: true, Score: true }
+      })
+    ]);
 
-    res.status(200).json({ success: true, data: profileData });
+    const average = (values) => values.length
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : 0;
+    const toDateKey = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const overallMastery = average(topicProgress.map((item) => Number(item.MasteryLevel) || 0));
+    const recordedScores = activities
+      .filter((activity) => activity.Score !== null)
+      .map((activity) => Number(activity.Score) || 0);
+    const statsAverageScore = average(learningStats.map((item) => Number(item.AverageScore) || 0));
+    const avgScore = statsAverageScore || average(recordedScores);
+    const statsStudySeconds = learningStats.reduce(
+      (sum, item) => sum + (Number(item.TotalTimeSpentSeconds) || 0),
+      0
+    );
+    const totalStudySeconds = statsStudySeconds || activities.reduce(
+      (sum, activity) => sum + (Number(activity.TimeSpentSeconds) || 0),
+      0
+    );
+    const studyDays = new Set(activities.map((activity) => toDateKey(activity.CreatedAt)));
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayKey = toDateKey(today);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = toDateKey(yesterday);
+    let streak = 0;
+    const streakStart = studyDays.has(todayKey)
+      ? today
+      : studyDays.has(yesterdayKey)
+        ? yesterday
+        : null;
+
+    if (streakStart) {
+      const cursor = new Date(streakStart);
+      while (studyDays.has(toDateKey(cursor))) {
+        streak++;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+    }
+
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+    const activeStudyDays = [...studyDays].filter((dateKey) => {
+      const [year, month, day] = dateKey.split('-').map(Number);
+      const activityDate = new Date(year, month - 1, day);
+      return activityDate >= thirtyDaysAgo && activityDate <= today;
+    }).length;
+    const studyConsistency = Math.round((activeStudyDays / 30) * 100);
+
+    const knowledgeMastery = topicProgress.map((item) => {
+      const score = Math.min(Math.max(Number(item.MasteryLevel) || 0, 0), 100);
+      const status = score >= 80
+        ? 'Thành thạo'
+        : score >= 50
+          ? 'Đang tiến bộ'
+          : 'Cần luyện tập';
+
+      return {
+        name: item.KnowledgeTopics.TopicName,
+        score: Number(score.toFixed(2)),
+        status,
+        trend: 'Mức hiện tại'
+      };
+    });
+    const strengths = knowledgeMastery
+      .filter((item) => item.score >= 80)
+      .map(({ name, score }) => ({ name, score }));
+    const weaknesses = knowledgeMastery
+      .filter((item) => item.score < 60)
+      .map((item) => ({
+        name: item.name,
+        suggestion: item.score === 0
+          ? 'Hãy bắt đầu học các bài thuộc chủ đề này để hệ thống ghi nhận tiến độ.'
+          : 'Nên ôn lại bài học và làm thêm bài tập thuộc chủ đề này.'
+      }));
+    const studyHours = totalStudySeconds / 3600;
+    const totalStudyTime = studyHours >= 1
+      ? `${Number(studyHours.toFixed(1))} giờ`
+      : `${Math.round(totalStudySeconds / 60)} phút`;
+
+    const profileData = {
+      overallMastery: Number(overallMastery.toFixed(2)),
+      masteryLevel: overallMastery >= 80
+        ? 'Thành thạo'
+        : overallMastery >= 50
+          ? 'Đang tiến bộ'
+          : topicProgress.length > 0
+            ? 'Cần luyện tập'
+            : 'Chưa có dữ liệu',
+      avgScore: Number(avgScore.toFixed(2)),
+      avgScoreStatus: learningStats.length || recordedScores.length
+        ? 'Điểm trung bình từ dữ liệu đã ghi nhận'
+        : 'Chưa có điểm được ghi nhận',
+      studyConsistency,
+      consistencyFreq: `${activeStudyDays}/30 ngày có hoạt động`,
+      totalStudyTime,
+      studyTimePeriod: totalStudySeconds > 0 ? 'Tổng thời gian đã ghi nhận' : 'Chưa có thời gian được ghi nhận',
+      streak,
+      streakStatus: streak > 0 ? 'Ngày học liên tiếp hiện tại' : 'Chưa có chuỗi ngày học liên tiếp',
+      knowledgeMastery,
+      strengths,
+      weaknesses
+    };
+
+    return res.status(200).json({ success: true, data: profileData });
   } catch (error) {
     console.error('Lỗi lấy data Profile:', error);
-    res.status(500).json({ success: false, message: 'Lỗi server' });
+    return res.status(500).json({ success: false, message: 'Không thể tải hồ sơ năng lực học tập.' });
   }
 };
 
@@ -374,10 +647,15 @@ const getExerciseDetail = async (req, res) => {
     const exercise = await prisma.exercises.findUnique({
       where: { ExerciseID: exerciseId },
       include: {
-        KnowledgeTopics: { select: { TopicName: true } },
+        KnowledgeTopics: { select: { TopicName: true, CourseID: true } },
         Lessons: {
           select: {
-            Chapters: { select: { Courses: { select: { Status: true } } } }
+            Chapters: {
+              select: {
+                CourseID: true,
+                Courses: { select: { Status: true } }
+              }
+            }
           }
         }
       }
@@ -396,6 +674,7 @@ const getExerciseDetail = async (req, res) => {
 
     const data = {
       id: exercise.ExerciseID,
+      courseId: exercise.Lessons?.Chapters?.CourseID || exercise.KnowledgeTopics?.CourseID || null,
       title: exercise.Title,
       topicName: exercise.KnowledgeTopics?.TopicName || "General",
       type: exercise.Type || "Exercise",
@@ -941,6 +1220,37 @@ const submitStudentQuiz = async (req, res) => {
         }
       });
 
+      const scoredAnswers = gradedAnswers.filter((item) => item.question.type !== 'essay');
+      const scoredPoints = scoredAnswers.reduce(
+        (sum, item) => sum + Number(item.question.points),
+        0
+      );
+      if (scoredAnswers.length > 0 && scoredPoints > 0) {
+        const correctPoints = scoredAnswers.reduce(
+          (sum, item) => sum + (item.isCorrect ? Number(item.question.points) : 0),
+          0
+        );
+        const correctCount = scoredAnswers.filter((item) => item.isCorrect).length;
+        await updateTopicProgress(tx, {
+          userId: studentId,
+          topicId,
+          attempted: scoredAnswers.length,
+          correct: correctCount,
+          averageScore: (correctPoints / scoredPoints) * 100,
+          attemptedAt: submittedAt
+        });
+      }
+
+      await tx.learningPathItems.updateMany({
+        where: {
+          TargetExerciseID: quiz.ExerciseID,
+          LearningPaths: {
+            is: { UserID: studentId, CourseID: courseId, Status: 'Active' }
+          }
+        },
+        data: { IsCompleted: true }
+      });
+
       return attempt;
     });
 
@@ -1318,7 +1628,7 @@ const executeCode = async (req, res) => {
 const submitExercise = async (req, res) => {
   try {
     // 1. LẤY ID NGƯỜI DÙNG TỪ TOKEN
-    const studentId = req.user?.id || req.user?.UserID || req.user?.userId || req.userId;
+    const studentId = req.user?.userId;
 
     if (!studentId) {
       return res.status(401).json({ success: false, message: 'Lỗi xác thực: Không tìm thấy ID học viên.' });
@@ -1326,7 +1636,15 @@ const submitExercise = async (req, res) => {
 
     const { exerciseId, courseId, code, isPassed } = req.body;
 
-    if (!exerciseId || !courseId || !code) {
+    if (
+      !Number.isSafeInteger(Number(exerciseId)) ||
+      Number(exerciseId) <= 0 ||
+      !Number.isSafeInteger(Number(courseId)) ||
+      Number(courseId) <= 0 ||
+      typeof code !== 'string' ||
+      !code.trim() ||
+      typeof isPassed !== 'boolean'
+    ) {
       return res.status(400).json({ success: false, message: 'Thiếu dữ liệu nộp bài.' });
     }
 
@@ -1339,6 +1657,7 @@ const submitExercise = async (req, res) => {
       select: {
         MaxScore: true,
         TopicID: true,
+        KnowledgeTopics: { select: { CourseID: true } },
         Lessons: {
           select: {
             Title: true,
@@ -1357,6 +1676,21 @@ const submitExercise = async (req, res) => {
     if (!exercise) return res.status(404).json({ success: false, message: 'Bài tập không tồn tại.' });
     if (exercise.Lessons?.Chapters?.Courses?.Status === 'Archived') {
       return res.status(409).json({ success: false, message: 'Khóa học này đã bị khóa, không thể nộp bài.' });
+    }
+    const exerciseCourseId = exercise.Lessons?.Chapters?.CourseID || exercise.KnowledgeTopics?.CourseID;
+    if (
+      exerciseCourseId !== cIdInt ||
+      (exercise.TopicID && exercise.KnowledgeTopics?.CourseID !== cIdInt)
+    ) {
+      return res.status(400).json({ success: false, message: 'Khóa học không khớp với bài tập.' });
+    }
+
+    const activeEnrollment = await prisma.enrollments.findFirst({
+      where: { UserID: studentId, CourseID: cIdInt, Status: 'Active' },
+      select: { EnrollmentID: true }
+    });
+    if (!activeEnrollment) {
+      return res.status(403).json({ success: false, message: 'Bạn cần có ghi danh đang hoạt động trong khóa học để nộp bài.' });
     }
     
     const scoreEarned = isPassed ? (exercise?.MaxScore || 10) : 0;
@@ -1385,14 +1719,15 @@ const submitExercise = async (req, res) => {
 
     // 4. TRANSACTION GHI DỮ LIỆU
     const result = await prisma.$transaction(async (prisma) => {
+      const submittedAt = new Date();
       
       // BƯỚC 1: Tạo TestAttempt
       const attempt = await prisma.testAttempts.create({
         data: {
           UserID: studentId,
           ExerciseID: exIdInt,
-          StartTime: new Date(),
-          EndTime: new Date(),
+          StartTime: submittedAt,
+          EndTime: submittedAt,
           TotalScore: scoreEarned
         }
       });
@@ -1434,9 +1769,30 @@ const submitExercise = async (req, res) => {
           TimeSpentSeconds: 0,
           Score: scoreEarned,
           IsCompleted: isPassed,
-          CreatedAt: new Date()
+          CreatedAt: submittedAt
         }
       });
+
+      await updateTopicProgress(prisma, {
+        userId: studentId,
+        topicId: validTopicId,
+        attempted: 1,
+        correct: isPassed ? 1 : 0,
+        averageScore: isPassed ? 100 : 0,
+        attemptedAt: submittedAt
+      });
+
+      if (isPassed) {
+        await prisma.learningPathItems.updateMany({
+          where: {
+            TargetExerciseID: exIdInt,
+            LearningPaths: {
+              is: { UserID: studentId, CourseID: cIdInt, Status: 'Active' }
+            }
+          },
+          data: { IsCompleted: true }
+        });
+      }
 
       return attempt;
     });

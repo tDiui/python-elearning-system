@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import AccountMenu from '../../components/AccountMenu';
 
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -109,10 +110,13 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
              </Link>
           </div>
           <div className="flex items-center gap-3 pt-4 border-t border-gray-100 px-2">
-            <div className="w-9 h-9 bg-blue-600 text-white font-bold rounded-full flex items-center justify-center text-sm uppercase shrink-0 shadow-sm">
-              {/* Lấy chữ cái đầu tiên của Tên thật để làm Avatar */}
-              {userName.charAt(0)}
-            </div>
+            <AccountMenu
+              fullName={userName}
+              roleLabel="Giảng viên"
+              onProfileUpdated={(account) => setUserName(account.fullName)}
+              avatarClassName="bg-blue-600 text-white"
+              menuPlacement="top-start"
+            />
             <div className="overflow-hidden">
               <p className="text-sm font-bold text-gray-900 truncate">{userName}</p>
               <p className="text-[11px] text-gray-500 font-medium">Instructor</p>
@@ -141,9 +145,12 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
                 <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></span>
               )}
             </button>
-            <div className="w-9 h-9 bg-blue-600 text-white font-bold rounded-full flex items-center justify-center text-sm uppercase shadow-sm cursor-pointer hover:bg-blue-700 transition-colors">
-              {userName.charAt(0)}
-            </div>
+            <AccountMenu
+              fullName={userName}
+              roleLabel="Giảng viên"
+              onProfileUpdated={(account) => setUserName(account.fullName)}
+              avatarClassName="bg-blue-600 text-white"
+            />
           </div>
         </header>
 
