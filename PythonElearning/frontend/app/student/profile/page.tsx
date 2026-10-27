@@ -32,6 +32,8 @@ export default function ProfilePage() {
   const router = useRouter();
   const [data, setData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -47,18 +49,20 @@ export default function ProfilePage() {
         });
 
         const result = await response.json();
-        if (result.success) {
-          setData(result.data);
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || 'Không thể tải hồ sơ năng lực học tập.');
         }
+        setData(result.data || null);
       } catch (error) {
         console.error('Lỗi tải dữ liệu profile:', error);
+        setError(error instanceof Error ? error.message : 'Không thể tải hồ sơ năng lực học tập.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchProfile();
-  }, [router]);
+  }, [retryCount, router]);
 
   // Hàm helper để render style thanh tiến độ
   const getProgressStyle = (status: string, score: number) => {
@@ -86,6 +90,31 @@ export default function ProfilePage() {
       <div className="flex h-[50vh] items-center justify-center">
         <div className="text-gray-500 font-medium flex items-center gap-2">
           <span className="animate-spin text-2xl">↻</span> Đang tải hồ sơ năng lực...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Hồ sơ năng lực học tập</h1>
+          <p className="text-sm text-gray-500">Cách hệ thống đánh giá tiến độ học tập của bạn</p>
+        </div>
+        <div role="alert" className="rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
+          <p className="font-semibold text-red-700">{error}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setError('');
+              setLoading(true);
+              setRetryCount((count) => count + 1);
+            }}
+            className="mt-5 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+          >
+            Thử tải lại
+          </button>
         </div>
       </div>
     );

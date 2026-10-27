@@ -122,6 +122,99 @@ const login = async (req, res) => {
     res.status(500).json({ success: false, message: 'Lỗi server khi đăng nhập' });
   }
 };
+
+const getAccountProfile = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ success: false, message: 'Không xác định được tài khoản.' });
+    }
+
+    const user = await prisma.users.findUnique({
+      where: { UserID: userId },
+      select: {
+        FullName: true,
+        Email: true,
+        StudentID: true,
+        Roles: { select: { RoleName: true } }
+      }
+    });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản.' });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        fullName: user.FullName,
+        email: user.Email,
+        studentId: user.StudentID,
+        role: user.Roles.RoleName
+      }
+    });
+  } catch (error) {
+    console.error('Lỗi lấy thông tin tài khoản:', error);
+    return res.status(500).json({ success: false, message: 'Không thể tải thông tin tài khoản.' });
+  }
+};
+
+const updateAccountProfile = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ success: false, message: 'Không xác định được tài khoản.' });
+    }
+
+    const fullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+    if (!fullName || fullName.length > 100) {
+      return res.status(400).json({ success: false, message: 'Họ tên bắt buộc và tối đa 100 ký tự.' });
+    }
+    if (
+      email.length > 150 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
+      return res.status(400).json({ success: false, message: 'Địa chỉ email không hợp lệ.' });
+    }
+
+    const existingEmail = await prisma.users.findFirst({
+      where: { Email: email, UserID: { not: userId } },
+      select: { UserID: true }
+    });
+    if (existingEmail) {
+      return res.status(409).json({ success: false, message: 'Email này đã được sử dụng bởi tài khoản khác.' });
+    }
+
+    const user = await prisma.users.update({
+      where: { UserID: userId },
+      data: { FullName: fullName, Email: email },
+      select: {
+        FullName: true,
+        Email: true,
+        StudentID: true,
+        Roles: { select: { RoleName: true } }
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Đã cập nhật thông tin tài khoản.',
+      data: {
+        fullName: user.FullName,
+        email: user.Email,
+        studentId: user.StudentID,
+        role: user.Roles.RoleName
+      }
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ success: false, message: 'Email này đã được sử dụng bởi tài khoản khác.' });
+    }
+    console.error('Lỗi cập nhật thông tin tài khoản:', error);
+    return res.status(500).json({ success: false, message: 'Không thể cập nhật thông tin tài khoản.' });
+  }
+};
+
 // 3. XỬ LÝ QUÊN MẬT KHẨU (Gửi yêu cầu)
 const forgotPassword = async (req, res) => {
   try {
@@ -168,4 +261,4 @@ const resetPassword = async (req, res) => {
     res.status(500).json({ success: false, message: 'Lỗi server khi đổi mật khẩu' });
   }
 };
-module.exports = { register, login, forgotPassword, resetPassword };
+module.exports = { register, login, getAccountProfile, updateAccountProfile, forgotPassword, resetPassword };

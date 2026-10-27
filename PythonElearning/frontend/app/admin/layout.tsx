@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { BarChart3, BookOpen, LayoutDashboard, Settings, Users } from 'lucide-react';
+import AccountMenu from '../../components/AccountMenu';
 
 const adminNavigation = [
   { label: 'Dashboard', href: '/admin/dashboard', available: true, Icon: LayoutDashboard },
@@ -21,7 +22,11 @@ const normalizeRole = (role: string) => role
 
 const subscribeToAuth = (callback: () => void) => {
   window.addEventListener('storage', callback);
-  return () => window.removeEventListener('storage', callback);
+  window.addEventListener('account-profile-updated', callback);
+  return () => {
+    window.removeEventListener('storage', callback);
+    window.removeEventListener('account-profile-updated', callback);
+  };
 };
 
 const getAuthSnapshot = () => {
@@ -72,9 +77,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
             <span className="text-lg font-bold tracking-tight text-gray-900">PyLearn AI</span>
           </div>
-          <div className="mx-4 mt-5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-            Admin View
-          </div>
           <nav aria-label="Admin navigation" className="mt-4 flex flex-col gap-1 px-3">
             {adminNavigation.map((item) => item.available ? (
               <Link
@@ -100,9 +102,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
         <div className="border-t border-gray-100 p-4">
           <div className="flex items-center gap-3 border-t border-gray-100 px-2 pt-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold uppercase text-white">
-              {userName.charAt(0)}
-            </div>
+            <AccountMenu
+              fullName={userName}
+              roleLabel="Quản trị viên"
+              avatarClassName="bg-blue-600 text-white"
+              menuPlacement="top-start"
+            />
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-gray-900">{userName}</p>
               <p className="text-[11px] font-medium text-gray-500">Admin</p>
@@ -114,9 +119,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-8">
           <p className="text-sm font-medium text-gray-500">Quản trị hệ thống</p>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-500 text-sm font-bold uppercase text-white">
-            {userName.charAt(0)}
-          </div>
+          <AccountMenu
+            fullName={userName}
+            roleLabel="Quản trị viên"
+            avatarClassName="bg-sky-500 text-white"
+          />
         </header>
         <div className="flex-1 overflow-y-auto p-6 md:p-8">{children}</div>
       </main>
