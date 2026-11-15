@@ -2,14 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU TỪ BACKEND
 type Student = {
   id: number;
   name: string;
+  studentId: string | null;
   avatar: string;
   progress: number;
-  avgScore: number;
+  avgScore: number | null;
   weakTopics: string[];
   lastActive: string;
   status: string;
@@ -17,19 +19,25 @@ type Student = {
 };
 
 type DashboardData = {
+  courseId: number;
   courseName: string;
   totalStudentsClass: number;
   stats: {
     totalStudents: number;
     activeStudents: number;
     courseCompletion: number;
-    avgScore: number;
+    completedStudents: number;
+    inProgressStudents: number;
+    notStartedStudents: number;
+    avgScore: number | null;
   };
   pendingApprovals: number;
   gradeDistribution: { range: string; count: number; height: string }[];
   hardTopics: { name: string; percent: number; color: string; text: string }[];
   students: Student[];
 };
+
+type CourseOption = { id: number; title: string };
 
 export default function TeacherDashboard() {
   const router = useRouter();
@@ -38,6 +46,10 @@ export default function TeacherDashboard() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('Tất cả');
+  const [courses, setCourses] = useState<CourseOption[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
 
   // 3. GỌI API LẤY DỮ LIỆU
   useEffect(() => {
@@ -49,24 +61,28 @@ export default function TeacherDashboard() {
           return;
         }
 
-        const response = await fetch('http://localhost:5000/api/teacher/dashboard', {
+        const query = selectedCourseId ? `?courseId=${selectedCourseId}` : '';
+        const response = await fetch(`http://localhost:5000/api/teacher/dashboard${query}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
         const result = await response.json();
         
-        if (result.success && result.data) {
-          setDashboardData(result.data);
-        }
+        if (!response.ok || !result.success) throw new Error(result.message || 'Không thể tải dữ liệu dashboard.');
+        setDashboardData(result.data);
+        setCourses(result.courses || []);
+        if (!selectedCourseId && result.data?.courseId) setSelectedCourseId(String(result.data.courseId));
+        setErrorMessage('');
       } catch (error) {
         console.error('Lỗi tải Teacher Dashboard:', error);
+        setErrorMessage(error instanceof Error ? error.message : 'Không thể tải dữ liệu dashboard.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchDashboard();
-  }, [router]);
+  }, [router, selectedCourseId]);
 
   // 4. XỬ LÝ GIAO DIỆN KHI ĐANG TẢI HOẶC LỖI
   if (loading) {
@@ -84,7 +100,7 @@ export default function TeacherDashboard() {
       <div className="flex flex-col items-center justify-center h-[70vh] bg-white rounded-3xl border border-gray-100 shadow-sm text-center p-8">
         <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center text-5xl mb-6 shadow-inner">📊</div>
         <h2 className="text-2xl font-bold text-gray-900 mb-3">Chưa có dữ liệu lớp học</h2>
-        <p className="text-gray-500 mb-8 max-w-md">Bạn chưa được phân công giảng dạy khóa học nào hoặc khóa học chưa có sinh viên đăng ký.</p>
+        <p className="text-gray-500 mb-8 max-w-md">{errorMessage || 'Bạn chưa được phân công giảng dạy khóa học nào hoặc khóa học chưa có sinh viên đăng ký.'}</p>
       </div>
     );
   }
@@ -94,19 +110,23 @@ export default function TeacherDashboard() {
     <div className="max-w-[1400px] mx-auto flex flex-col gap-6 pb-12">
       
       {/* HEADER */}
-      <div className="flex justify-between items-end">
+      <div className="flex flex-wrap justify-between items-end gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Instructor Dashboard</h1>
           <p className="text-sm text-gray-500">{dashboardData.courseName} — {dashboardData.totalStudentsClass} sinh viên</p>
         </div>
-        <button className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors relative">
-          Quản lý đăng ký
-          {dashboardData.pendingApprovals > 0 && (
-            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold border-2 border-white">
-              {dashboardData.pendingApprovals}
-            </span>
-          )}
-        </button>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs font-semibold text-gray-600">
+            Khóa học
+            <select value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} className="mt-1 block min-w-52 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800">
+              {courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}
+            </select>
+          </label>
+          <Link href="/teacher/enrollments" className="relative rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700">
+            Quản lý đăng ký
+            {dashboardData.pendingApprovals > 0 && <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 text-[10px] font-bold text-white">{dashboardData.pendingApprovals}</span>}
+          </Link>
+        </div>
       </div>
 
       {/* STAT CARDS */}
@@ -128,7 +148,7 @@ export default function TeacherDashboard() {
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
           <div className="text-2xl mb-2">🎯</div>
-          <p className="text-2xl font-bold text-orange-600">{dashboardData.stats.avgScore}%</p>
+          <p className="text-2xl font-bold text-orange-600">{dashboardData.stats.avgScore === null ? '—' : `${dashboardData.stats.avgScore}%`}</p>
           <p className="text-xs font-bold text-gray-500 mt-1">Avg Score</p>
         </div>
       </div>
@@ -140,12 +160,12 @@ export default function TeacherDashboard() {
             <div className="bg-[#ffe58f] w-10 h-10 rounded-lg flex items-center justify-center text-xl">⏳</div>
             <div>
               <p className="font-bold text-gray-900 text-sm">{dashboardData.pendingApprovals} đơn đăng ký đang chờ duyệt</p>
-              <p className="text-xs text-amber-700 font-medium mt-0.5">★ AI đã phân tích mức độ phù hợp của từng sinh viên</p>
+              <p className="text-xs text-amber-700 font-medium mt-0.5">Các yêu cầu ghi danh đang chờ xử lý</p>
             </div>
           </div>
-          <button className="text-sm text-gray-600 hover:text-gray-900 font-medium flex items-center gap-1">
+          <Link href="/teacher/enrollments" className="text-sm text-gray-600 hover:text-gray-900 font-medium flex items-center gap-1">
             Xem đơn ›
-          </button>
+          </Link>
         </div>
       )}
 
@@ -160,7 +180,7 @@ export default function TeacherDashboard() {
               <div key={idx} className="flex flex-col items-center gap-2 flex-1">
                 <div className="w-full bg-blue-600 rounded-t-sm hover:bg-blue-700 transition-all cursor-pointer relative group" style={{ height: item.height }}>
                   <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] py-1 px-2 rounded font-medium transition-opacity">
-                    {item.count} SV
+                    {item.count} lượt đã chấm
                   </div>
                 </div>
                 <span className="text-[10px] text-gray-400 font-medium">{item.range}</span>
@@ -175,15 +195,15 @@ export default function TeacherDashboard() {
           <div className="relative w-40 h-40 mb-6">
             <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">
               <circle cx="50" cy="50" r="40" fill="transparent" stroke="#f3f4f6" strokeWidth="15" />
-              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#2563eb" strokeWidth="15" strokeDasharray="180 251" />
-              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#10b981" strokeWidth="15" strokeDasharray="60 251" strokeDashoffset="-180" />
+              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#2563eb" strokeWidth="15" strokeDasharray={`${dashboardData.stats.inProgressStudents / Math.max(dashboardData.stats.totalStudents, 1) * 251} 251`} />
+              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#10b981" strokeWidth="15" strokeDasharray={`${dashboardData.stats.completedStudents / Math.max(dashboardData.stats.totalStudents, 1) * 251} 251`} strokeDashoffset={`${-dashboardData.stats.inProgressStudents / Math.max(dashboardData.stats.totalStudents, 1) * 251}`} />
             </svg>
             <div className="absolute inset-0 bg-white m-5 rounded-full shadow-inner"></div>
           </div>
           <div className="flex gap-4 text-[10px] text-gray-500 font-medium">
-             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-gray-200 rounded-sm"></span> Chưa bắt đầu</span>
-             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-emerald-500 rounded-sm"></span> Hoàn thành</span>
-             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-blue-600 rounded-sm"></span> Đang học</span>
+             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-gray-200 rounded-sm"></span> Chưa bắt đầu: {dashboardData.stats.notStartedStudents}</span>
+             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-emerald-500 rounded-sm"></span> Hoàn thành: {dashboardData.stats.completedStudents}</span>
+             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-blue-600 rounded-sm"></span> Đang học: {dashboardData.stats.inProgressStudents}</span>
           </div>
         </div>
 
@@ -219,7 +239,7 @@ export default function TeacherDashboard() {
           <div className="flex items-center gap-4 w-full md:w-auto">
             <div className="relative flex-1 md:w-64">
               <span className="absolute left-3 top-2 text-gray-400 text-sm">🔍</span>
-              <input type="text" placeholder="Tìm tên, chủ đề yếu..." className="w-full bg-gray-50 border border-gray-100 rounded-lg py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" />
+              <input type="text" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Tìm tên, MSSV, chủ đề yếu..." className="w-full bg-gray-50 border border-gray-100 rounded-lg py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" />
             </div>
             
             <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-100">
@@ -257,6 +277,7 @@ export default function TeacherDashboard() {
               {dashboardData.students
                 // Xử lý Lọc dữ liệu theo Tab (Tất cả / Đang học / Không hoạt động)
                 .filter(student => activeFilter === 'Tất cả' || student.status === activeFilter)
+                .filter((student) => `${student.name} ${student.studentId || ''} ${student.weakTopics.join(' ')}`.toLowerCase().includes(studentSearch.toLowerCase()))
                 .map((student) => (
                 <tr key={student.id} className="hover:bg-gray-50/50 transition-colors">
                   <td className="py-4 px-6">
@@ -276,8 +297,8 @@ export default function TeacherDashboard() {
                     </div>
                   </td>
                   <td className="py-4 px-6">
-                    <span className={`font-bold text-sm ${student.avgScore >= 80 ? 'text-emerald-600' : student.avgScore >= 60 ? 'text-orange-500' : 'text-red-500'}`}>
-                      {student.avgScore}%
+                    <span className={`font-bold text-sm ${student.avgScore === null ? 'text-gray-400' : student.avgScore >= 80 ? 'text-emerald-600' : student.avgScore >= 60 ? 'text-orange-500' : 'text-red-500'}`}>
+                      {student.avgScore === null ? '—' : `${student.avgScore}%`}
                     </span>
                   </td>
                   <td className="py-4 px-6">
@@ -298,16 +319,16 @@ export default function TeacherDashboard() {
                   </td>
                   <td className="py-4 px-6">
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-1.5 h-1.5 rounded-full ${student.status === 'Hoạt động' ? 'bg-emerald-500' : 'bg-gray-300'}`}></span>
-                      <span className={`text-xs font-semibold ${student.status === 'Hoạt động' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${student.status === 'Đang học' ? 'bg-emerald-500' : 'bg-gray-300'}`}></span>
+                      <span className={`text-xs font-semibold ${student.status === 'Đang học' ? 'text-emerald-600' : 'text-gray-400'}`}>
                         {student.status}
                       </span>
                     </div>
                   </td>
                   <td className="py-4 px-6 text-right">
-                    <button className="text-xs font-medium text-gray-400 hover:text-blue-600 transition-colors">
+                    <Link href={`/teacher/dashboard/students/${dashboardData.courseId}/${student.id}`} className="text-xs font-medium text-gray-400 hover:text-blue-600 transition-colors">
                       Xem chi tiết ›
-                    </button>
+                    </Link>
                   </td>
                 </tr>
               ))}

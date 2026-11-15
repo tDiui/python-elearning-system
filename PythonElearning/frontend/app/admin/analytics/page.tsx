@@ -42,6 +42,15 @@ type AnalyticsData = {
   trend: TrendPoint[];
 };
 type ApiResponse<T> = { success: boolean; message?: string; data: T };
+type DetailMetric = 'users' | 'courses' | 'enrollments' | 'activities' | 'quizzes' | 'quizAttempts' | 'aiRoadmaps';
+type AnalyticsDetail = {
+  metric: DetailMetric;
+  page: number;
+  pageSize: number;
+  total: number;
+  columns: Array<{ key: string; label: string }>;
+  items: Array<Record<string, string | number | null>>;
+};
 
 const periodLabels: Record<Period, string> = {
   week: '7 ngày gần đây',
@@ -49,12 +58,16 @@ const periodLabels: Record<Period, string> = {
   year: '12 tháng gần đây'
 };
 
-async function adminRequest<T>(path: string): Promise<ApiResponse<T>> {
+async function adminRequest<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
 
   const response = await fetch(`http://localhost:5000/api/admin${path}`, {
-    headers: { Authorization: ['Bearer', token].join(' ') }
+    ...init,
+    headers: {
+      Authorization: ['Bearer', token].join(' '),
+      ...init?.headers
+    }
   });
   const payload = await response.json() as ApiResponse<T>;
   if (!response.ok || !payload.success) {
@@ -68,16 +81,23 @@ function MetricCard({
   value,
   detail,
   icon: Icon,
-  tone
+  tone,
+  onClick
 }: {
   label: string;
   value: string | number;
   detail: string;
   icon: typeof Users;
   tone: string;
+  onClick?: () => void;
 }) {
   return (
-    <article className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className="w-full rounded-xl border border-gray-100 bg-white p-5 text-left shadow-sm transition hover:border-blue-200 hover:shadow disabled:cursor-default disabled:hover:border-gray-100 disabled:hover:shadow-sm"
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-gray-500">{label}</p>
@@ -88,7 +108,8 @@ function MetricCard({
           <Icon size={19} />
         </span>
       </div>
-    </article>
+      {onClick && <p className="mt-3 text-xs font-semibold text-blue-600">Xem chi tiết →</p>}
+    </button>
   );
 }
 
@@ -157,6 +178,11 @@ export default function AdminAnalyticsPage() {
   const [error, setError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [detailMetric, setDetailMetric] = useState<DetailMetric | null>(null);
+  const [detailPage, setDetailPage] = useState(1);
+  const [detailData, setDetailData] = useState<AnalyticsDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -182,35 +208,96 @@ export default function AdminAnalyticsPage() {
     return () => controller.abort();
   }, [period, courseId, refreshKey]);
 
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      setLoading(true);
+      setError('');
+      setRefreshKey((key) => key + 1);
+    };
+
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => document.removeEventListener('visibilitychange', refreshWhenVisible);
+  }, []);
+
+  useEffect(() => {
+    if (!detailMetric) return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      metric: detailMetric,
+      period,
+      page: String(detailPage)
+    });
+    if (courseId !== 'all') query.set('courseId', courseId);
+
+    const fetchDetails = async () => {
+      setDetailLoading(true);
+      setDetailError('');
+      try {
+        const result = await adminRequest<AnalyticsDetail>(`/analytics/details?${query.toString()}`, {
+          signal: controller.signal
+        });
+        if (!controller.signal.aborted) setDetailData(result.data);
+      } catch (loadError) {
+        if (controller.signal.aborted) return;
+        console.error('Lỗi tải chi tiết Analytics:', loadError);
+        setDetailError(loadError instanceof Error ? loadError.message : 'Không thể tải dữ liệu chi tiết.');
+      } finally {
+        if (!controller.signal.aborted) setDetailLoading(false);
+      }
+    };
+
+    void fetchDetails();
+    return () => controller.abort();
+  }, [detailMetric, detailPage, period, courseId]);
+
+  const openDetails = (metric: DetailMetric) => {
+    setDetailData(null);
+    setDetailPage(1);
+    setDetailError('');
+    setDetailMetric(metric);
+  };
+
   const summary = data?.summary;
+  const detailScope = detailMetric === 'users'
+    ? 'Danh sách người dùng hiện tại trên toàn hệ thống'
+    : detailMetric === 'courses'
+      ? 'Danh sách khóa học hiện tại theo bộ lọc'
+      : detailMetric === 'quizzes'
+        ? 'Bài kiểm tra hiện có theo khóa học được chọn'
+        : 'Dữ liệu theo bộ lọc thời gian và khóa học hiện tại';
   const cards = [
     {
       label: 'Tổng người dùng',
       value: summary?.users.total.toLocaleString('vi-VN') ?? '—',
       detail: `${summary?.users.students ?? 0} học viên · ${summary?.users.instructors ?? 0} giảng viên · ${summary?.users.administrators ?? 0} quản trị viên`,
       icon: Users,
-      tone: 'bg-blue-50 text-blue-600'
+      tone: 'bg-blue-50 text-blue-600',
+      onClick: () => openDetails('users')
     },
     {
       label: 'Khóa học đang hoạt động',
       value: summary?.courses.published.toLocaleString('vi-VN') ?? '—',
       detail: `Trong tổng số ${summary?.courses.total.toLocaleString('vi-VN') ?? 0} khóa học`,
       icon: BookOpen,
-      tone: 'bg-violet-50 text-violet-600'
+      tone: 'bg-violet-50 text-violet-600',
+      onClick: () => openDetails('courses')
     },
     {
       label: 'Lượt đăng ký trong kỳ',
       value: summary?.enrollments.toLocaleString('vi-VN') ?? '—',
       detail: periodLabels[period],
       icon: GraduationCap,
-      tone: 'bg-cyan-50 text-cyan-600'
+      tone: 'bg-cyan-50 text-cyan-600',
+      onClick: () => openDetails('enrollments')
     },
     {
       label: 'Tỷ lệ hoàn thành',
       value: `${summary?.completionRate ?? 0}%`,
       detail: `${summary?.completedEnrollments.toLocaleString('vi-VN') ?? 0} / ${summary?.activeEnrollments.toLocaleString('vi-VN') ?? 0} lượt đăng ký đang học hoàn thành`,
       icon: CheckCircle2,
-      tone: 'bg-emerald-50 text-emerald-600'
+      tone: 'bg-emerald-50 text-emerald-600',
+      onClick: () => openDetails('enrollments')
     }
   ];
 
@@ -313,6 +400,7 @@ export default function AdminAnalyticsPage() {
               detail={periodLabels[period]}
               icon={Activity}
               tone="bg-amber-50 text-amber-600"
+              onClick={() => openDetails('activities')}
             />
             <MetricCard
               label="Bài kiểm tra"
@@ -320,6 +408,7 @@ export default function AdminAnalyticsPage() {
               detail="Tổng số quiz hiện có"
               icon={BookOpen}
               tone="bg-indigo-50 text-indigo-600"
+              onClick={() => openDetails('quizzes')}
             />
             <MetricCard
               label="Lượt làm bài kiểm tra"
@@ -327,6 +416,7 @@ export default function AdminAnalyticsPage() {
               detail={periodLabels[period]}
               icon={CheckCircle2}
               tone="bg-rose-50 text-rose-600"
+              onClick={() => openDetails('quizAttempts')}
             />
             <MetricCard
               label="Lượt sử dụng AI Lộ trình"
@@ -334,6 +424,7 @@ export default function AdminAnalyticsPage() {
               detail={periodLabels[period]}
               icon={Bot}
               tone="bg-fuchsia-50 text-fuchsia-600"
+              onClick={() => openDetails('aiRoadmaps')}
             />
           </section>
 
@@ -371,6 +462,72 @@ export default function AdminAnalyticsPage() {
               </table>
             </div>
           </details>
+
+          {detailMetric && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setDetailMetric(null);
+            }}>
+              <section role="dialog" aria-modal="true" aria-labelledby="analytics-detail-title" className="max-h-[85vh] w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-xl">
+                <header className="flex items-start justify-between gap-4 border-b border-gray-100 p-5">
+                  <div>
+                    <h2 id="analytics-detail-title" className="text-lg font-bold text-gray-900">
+                      {detailMetric === 'users' ? 'Người dùng' :
+                        detailMetric === 'courses' ? 'Khóa học' :
+                          detailMetric === 'enrollments' ? 'Lượt đăng ký' :
+                            detailMetric === 'activities' ? 'Hoạt động học tập' :
+                              detailMetric === 'quizzes' ? 'Bài kiểm tra' :
+                                detailMetric === 'quizAttempts' ? 'Lượt làm bài kiểm tra' : 'Lộ trình AI'}
+                    </h2>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {detailData ? `${detailData.total.toLocaleString('vi-VN')} bản ghi · trang ${detailPage}` : detailScope}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setDetailMetric(null)} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200">Đóng</button>
+                </header>
+                {detailError && <p role="alert" className="m-5 rounded-lg bg-red-50 p-3 text-sm text-red-700">{detailError}</p>}
+                <div className="max-h-[60vh] overflow-auto">
+                  {detailLoading && !detailData ? (
+                    <p className="p-8 text-center text-sm text-gray-500">Đang tải dữ liệu chi tiết...</p>
+                  ) : detailData?.items.length ? (
+                    <table className="w-full min-w-[700px] text-left text-sm">
+                      <thead className="sticky top-0 bg-gray-50 text-xs font-semibold text-gray-500">
+                        <tr>
+                          {detailData.columns.map((column) => <th key={column.key} className="px-4 py-3">{column.label}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {detailData.items.map((item, index) => (
+                          <tr key={String(item.id ?? index)} className="align-top">
+                            {detailData.columns.map((column) => {
+                              const value = item[column.key];
+                              const isDate = value !== null && typeof value === 'string' &&
+                                /At$|Date$/.test(column.key) && !Number.isNaN(Date.parse(value));
+                              return (
+                                <td key={column.key} className="max-w-xs px-4 py-3 text-gray-700">
+                                  {value === null || value === '' ? '—' :
+                                    isDate ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) :
+                                    typeof value === 'number' ? value.toLocaleString('vi-VN') : value}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : !detailLoading && <p className="p-8 text-center text-sm text-gray-500">Không có dữ liệu chi tiết trong phạm vi đã chọn.</p>}
+                </div>
+                <footer className="flex items-center justify-between border-t border-gray-100 p-4">
+                  <span className="text-xs text-gray-500">
+                    {detailData?.total ? `${(detailPage - 1) * (detailData.pageSize) + 1}–${Math.min(detailPage * detailData.pageSize, detailData.total)} / ${detailData.total}` : '0 bản ghi'}
+                  </span>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setDetailPage((current) => Math.max(1, current - 1))} disabled={detailPage <= 1 || detailLoading} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 disabled:opacity-40">Trước</button>
+                    <button type="button" onClick={() => setDetailPage((current) => current + 1)} disabled={!detailData || detailPage * detailData.pageSize >= detailData.total || detailLoading} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 disabled:opacity-40">Tiếp</button>
+                  </div>
+                </footer>
+              </section>
+            </div>
+          )}
 
           <section aria-label="Chỉ số chưa có nguồn dữ liệu" className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <article className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5">

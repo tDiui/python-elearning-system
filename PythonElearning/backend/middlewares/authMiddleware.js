@@ -10,6 +10,8 @@ const normalizeRoleName = (roleName = '') => String(roleName)
   .replace(/[\u0300-\u036f]/g, '');
 
 const adminRoleNames = ['admin', 'quan tri vien'];
+const studentRoleNames = ['student', 'sinh vien'];
+const teacherRoleNames = ['teacher', 'giang vien', 'instructor'];
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -60,4 +62,20 @@ const requireAdmin = (req, res, next) => {
   return next();
 };
 
-module.exports = { verifyToken, requireAdmin };
+const requireStudent = (req, res, next) => {
+  const roleName = normalizeRoleName(req.user?.role || '');
+  if (!studentRoleNames.includes(roleName)) {
+    return res.status(403).json({ success: false, message: 'Chỉ học viên mới được sử dụng chức năng này.' });
+  }
+  return next();
+};
+
+const requireTeacher = (req, res, next) => {
+  const roleName = normalizeRoleName(req.user?.role || '');
+  if (!teacherRoleNames.includes(roleName)) {
+    return res.status(403).json({ success: false, message: 'Chỉ giảng viên mới được sử dụng chức năng này.' });
+  }
+  return next();
+};
+
+module.exports = { verifyToken, requireAdmin, requireStudent, requireTeacher };

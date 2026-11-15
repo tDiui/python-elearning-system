@@ -298,9 +298,9 @@ export default function AdminSettingsPage() {
           <section className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 p-5">
             <ShieldCheck size={18} className="mt-0.5 shrink-0 text-blue-700" />
             <div>
-              <h2 className="text-sm font-bold text-blue-950">Lưu cấu hình chưa đồng nghĩa với tích hợp AI</h2>
+              <h2 className="text-sm font-bold text-blue-950">Cấu hình AI được dùng khi tạo lộ trình</h2>
               <p className="mt-1 text-sm leading-6 text-blue-900">
-                Backend hiện chưa có client gọi OpenAI/Gemini. Trang này lưu cấu hình an toàn; việc kiểm tra API Key và áp dụng cấu hình vào tạo lộ trình cần phần tích hợp AI riêng. Không có yêu cầu AI nào được gửi từ thao tác lưu.
+                Provider, model và API Key đã lưu được ưu tiên khi tạo lộ trình; nếu chưa có cấu hình đã lưu, backend dùng các biến môi trường. Lưu cấu hình không gửi yêu cầu kiểm tra tới nhà cung cấp AI.
               </p>
             </div>
           </section>

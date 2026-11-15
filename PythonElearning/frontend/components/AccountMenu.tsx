@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogOut, Pencil, Save, UserRound, X } from 'lucide-react';
+import { KeyRound, LogOut, Pencil, Save, UserRound, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 type Account = {
@@ -41,11 +41,17 @@ export default function AccountMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [account, setAccount] = useState<Account | null>(null);
   const [form, setForm] = useState({ fullName: '', email: '' });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
 
   useEffect(() => {
@@ -62,6 +68,7 @@ export default function AccountMenu({
       if (event.key === 'Escape') {
         setOpen(false);
         setEditing(false);
+        setChangingPassword(false);
       }
     };
     document.addEventListener('mousedown', closeOnOutsideClick);
@@ -188,6 +195,48 @@ export default function AccountMenu({
     }
   };
 
+  const changePassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const token = getToken();
+    if (!token) {
+      router.replace('/login');
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setError('Mật khẩu xác nhận không khớp.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/password', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+      const payload = await response.json() as AccountResponse;
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Không thể đổi mật khẩu.');
+      }
+
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setChangingPassword(false);
+      window.alert(payload.message || 'Đã đổi mật khẩu thành công.');
+    } catch (requestError) {
+      console.error('Lỗi đổi mật khẩu:', requestError);
+      setError(requestError instanceof Error ? requestError.message : 'Không thể đổi mật khẩu.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -232,6 +281,20 @@ export default function AccountMenu({
           <button
             type="button"
             role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setError('');
+              setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+              setChangingPassword(true);
+            }}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-gray-700 transition hover:bg-gray-50"
+          >
+            <KeyRound className="h-4 w-4 text-gray-400" />
+            Đổi mật khẩu
+          </button>
+          <button
+            type="button"
+            role="menuitem"
             onClick={logout}
             className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 transition hover:bg-red-50"
           >
@@ -242,14 +305,17 @@ export default function AccountMenu({
         document.body
       )}
 
-      {editing && (
+      {(editing || changingPassword) && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 p-4" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setEditing(false);
+          if (event.target === event.currentTarget) {
+            setEditing(false);
+            setChangingPassword(false);
+          }
         }}>
           <section
             role="dialog"
             aria-modal="true"
-            aria-labelledby="account-edit-title"
+            aria-labelledby={changingPassword ? 'account-password-title' : 'account-edit-title'}
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
           >
             <div className="mb-5 flex items-start justify-between">
@@ -258,22 +324,88 @@ export default function AccountMenu({
                   <UserRound className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 id="account-edit-title" className="font-bold text-gray-900">Thông tin tài khoản</h2>
-                  <p className="text-xs text-gray-500">Cập nhật họ tên và email của bạn</p>
+                  <h2 id={changingPassword ? 'account-password-title' : 'account-edit-title'} className="font-bold text-gray-900">
+                    {changingPassword ? 'Đổi mật khẩu' : 'Thông tin tài khoản'}
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {changingPassword ? 'Xác nhận mật khẩu hiện tại để tiếp tục' : 'Cập nhật họ tên và email của bạn'}
+                  </p>
                 </div>
               </div>
               <button
                 type="button"
                 aria-label="Đóng"
-                onClick={() => setEditing(false)}
+                onClick={() => {
+                  setEditing(false);
+                  setChangingPassword(false);
+                  setError('');
+                }}
                 className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {loading ? (
+            {editing && loading ? (
               <p className="py-8 text-center text-sm text-gray-500">Đang tải thông tin...</p>
+            ) : changingPassword ? (
+              <form onSubmit={changePassword} className="flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
+                  Mật khẩu hiện tại
+                  <input
+                    required
+                    type="password"
+                    autoComplete="current-password"
+                    value={passwordForm.currentPassword}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))}
+                    className="rounded-lg border border-gray-200 px-3 py-2.5 font-normal outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
+                  Mật khẩu mới
+                  <input
+                    required
+                    type="password"
+                    minLength={6}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={passwordForm.newPassword}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))}
+                    className="rounded-lg border border-gray-200 px-3 py-2.5 font-normal outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
+                  Xác nhận mật khẩu mới
+                  <input
+                    required
+                    type="password"
+                    minLength={6}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={passwordForm.confirmPassword}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+                    className="rounded-lg border border-gray-200 px-3 py-2.5 font-normal outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+                {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+                <div className="mt-2 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setChangingPassword(false)}
+                    className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    {saving ? 'Đang lưu...' : 'Đổi mật khẩu'}
+                  </button>
+                </div>
+              </form>
             ) : (
               <form onSubmit={saveProfile} className="flex flex-col gap-4">
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">

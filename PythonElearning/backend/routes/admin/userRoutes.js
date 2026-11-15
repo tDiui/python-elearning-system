@@ -20,12 +20,13 @@ const {
   updateCourseLock,
   deleteCourse
 } = require('../../controllers/admin/courseController');
-const { getAnalytics } = require('../../controllers/admin/analyticsController');
+const { getAnalytics, getAnalyticsDetails } = require('../../controllers/admin/analyticsController');
 const { getSystemSettings, updateSystemSettings } = require('../../controllers/admin/settingsController');
 
-router.get('/dashboard', verifyToken, getAdminDashboard);
+router.get('/dashboard', verifyToken, requireAdmin, getAdminDashboard);
 router.use(verifyToken, requireAdmin);
 router.get('/analytics', getAnalytics);
+router.get('/analytics/details', getAnalyticsDetails);
 router.get('/settings', getSystemSettings);
 router.put('/settings', updateSystemSettings);
 router.get('/courses', getManagementData);

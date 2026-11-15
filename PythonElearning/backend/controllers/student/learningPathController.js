@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { callLLMProvider } = require('../../services/aiService');
+const { getRuntimeAISettings } = require('../admin/settingsController');
 
 // =========================================================
 // HÀM DỰ PHÒNG (RULE-BASED FALLBACK) KHI MODEL AI KÉM HIỆU QUẢ
@@ -65,7 +66,10 @@ const generateLearningPath = async (req, res) => {
       return res.status(400).json({ success: false, message: 'CourseID không hợp lệ.' });
     }
 
-    const selectedProvider = String(provider || process.env.AI_PROVIDER || 'gemini').trim().toLowerCase();
+    const savedAISettings = await getRuntimeAISettings();
+    const selectedProvider = String(
+      savedAISettings?.provider || provider || process.env.AI_PROVIDER || 'gemini'
+    ).trim().toLowerCase();
     if (!['gemini', 'openai'].includes(selectedProvider)) {
       return res.status(400).json({ success: false, message: 'Nhà cung cấp AI không được hỗ trợ.' });
     }
@@ -87,6 +91,25 @@ const generateLearningPath = async (req, res) => {
       });
     }
 
+    const learningActivityCount = await prisma.learningActivities.count({
+      where: {
+        UserID: userId,
+        CourseID: parsedCourseId,
+        OR: [
+          { TimeSpentSeconds: { gt: 0 } },
+          { LessonID: { not: null }, ActionType: 'LessonCompleted', IsCompleted: true },
+          { ExerciseID: { not: null }, ActionType: { in: ['Submit Code', 'Submit Quiz'] } }
+        ]
+      }
+    });
+    if (learningActivityCount === 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'INSUFFICIENT_LEARNING_DATA',
+        message: 'Hãy học ít nhất một bài, ghi nhận thời gian học hoặc làm bài tập/quiz trước khi tạo lộ trình cá nhân hóa.'
+      });
+    }
+
     // 1. LẤY DỮ LIỆU TIẾN ĐỘ THEO TOPIC & HOẠT ĐỘNG GẦN ĐÂY
     const topicProgress = await prisma.studentTopicProgress.findMany({
       where: {
@@ -100,7 +123,14 @@ const generateLearningPath = async (req, res) => {
       where: { UserID: userId, CourseID: parsedCourseId },
       orderBy: { CreatedAt: 'desc' },
       take: 15,
-      select: { LessonID: true, ExerciseID: true, ActionType: true, Score: true, IsCompleted: true }
+      select: {
+        LessonID: true,
+        ExerciseID: true,
+        ActionType: true,
+        Score: true,
+        IsCompleted: true,
+        TimeSpentSeconds: true
+      }
     });
 
     // Phân loại Điểm mạnh / Điểm yếu từ bảng StudentTopicProgress
@@ -128,7 +158,7 @@ const generateLearningPath = async (req, res) => {
 
     // 2. LẤY KHO NỘI DUNG HỢP LỆ CỦA KHÓA HỌC (DÙNG ĐỂ GỬI AI & ĐỐI CHIẾU VALIDATION)
     const courseLessons = await prisma.lessons.findMany({
-      where: { Chapters: { CourseID: parsedCourseId } },
+      where: { Chapters: { CourseID: parsedCourseId }, Status: 'Published' },
       select: {
         LessonID: true, Title: true, Difficulty: true,
         LessonTopics: { select: { TopicID: true } }
@@ -140,7 +170,7 @@ const generateLearningPath = async (req, res) => {
         Status: { not: 'Draft' },
         OR: [
           { KnowledgeTopics: { CourseID: parsedCourseId } },
-          { Lessons: { Chapters: { CourseID: parsedCourseId } } }
+          { Lessons: { Status: 'Published', Chapters: { CourseID: parsedCourseId } } }
         ]
       },
       select: { ExerciseID: true, Title: true, DifficultyLevel: true, TopicID: true, LessonID: true }
@@ -256,7 +286,13 @@ ${JSON.stringify(validExercises)}
 }`;
 
     // 4. GỌI AI VÀ KIỂM DUYỆT KẾT QUẢ
-    const aiResult = await callLLMProvider(promptText, { provider: selectedProvider });
+    const aiResult = await callLLMProvider(promptText, {
+      provider: selectedProvider,
+      ...(savedAISettings
+        ? { modelName: savedAISettings.model, apiKey: savedAISettings.apiKey }
+        : {}),
+      timeoutMs: 15000
+    });
     let validItemsToInsert = [];
     let pathTitle = 'Lộ trình học tập cá nhân hóa';
     let usedFallback = false;

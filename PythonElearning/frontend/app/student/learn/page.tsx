@@ -118,7 +118,9 @@ function LearnPageContent() {
            </div>
            <h1 className="text-2xl font-bold text-gray-900 mb-3">{lessonData.title}</h1>
            <div className="flex items-center gap-4 text-xs font-medium">
-             <span className="text-gray-500 flex items-center gap-1">⏱ {lessonData.duration} phút</span>
+             <span className="text-gray-500 flex items-center gap-1">
+               {lessonData.duration > 0 ? `⏱ ${lessonData.duration} phút` : 'Chưa đặt thời lượng'}
+             </span>
              <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{lessonData.difficulty}</span>
            </div>
         </div>

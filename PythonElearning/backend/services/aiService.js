@@ -18,8 +18,10 @@ const extractSafeJSON = (rawText) => {
 
 // Hàm gọi AI đa nền tảng (Universal LLM Caller)
 const callLLMProvider = async (promptText, options = {}) => {
-  // Có thể truyền provider từ DB (UC3.3) hoặc lấy mặc định từ file .env
   const provider = options.provider || process.env.AI_PROVIDER || 'gemini'; // 'gemini' | 'openai'
+  const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : 15000;
   const startTime = Date.now();
 
   try {
@@ -28,7 +30,9 @@ const callLLMProvider = async (promptText, options = {}) => {
     // ==========================================
     if (provider === 'gemini') {
       const modelName = options.modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error('Chưa cấu hình API Key cho Gemini.');
+      const ai = new GoogleGenAI({ apiKey });
 
       const response = await ai.models.generateContent({
         model: modelName,
@@ -36,6 +40,10 @@ const callLLMProvider = async (promptText, options = {}) => {
         config: {
           temperature: 0.2, // Hạ nhiệt độ thấp để AI bớt "sáng tạo" lung tung, bám sát ID thật
           responseMimeType: 'application/json', // Ép trả về chuẩn MIME JSON
+          httpOptions: {
+            timeout: timeoutMs,
+            retryOptions: { attempts: 1 }
+          }
         }
       });
 
@@ -61,12 +69,14 @@ const callLLMProvider = async (promptText, options = {}) => {
     if (provider === 'openai') {
       const apiUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1/chat/completions';
       const modelName = options.modelName || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+      const apiKey = options.apiKey || process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error('Chưa cấu hình API Key cho OpenAI.');
 
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
           model: modelName,
@@ -76,7 +86,8 @@ const callLLMProvider = async (promptText, options = {}) => {
           ],
           temperature: 0.2,
           response_format: { type: 'json_object' } // Ép chuẩn JSON của OpenAI
-        })
+        }),
+        signal: AbortSignal.timeout(timeoutMs)
       });
 
       const result = await response.json();
@@ -108,7 +119,9 @@ const callLLMProvider = async (promptText, options = {}) => {
       modelName: options.modelName || 'unknown',
       rawResponse: null,
       parsedData: null,
-      errorMessage: error.message,
+      errorMessage: error.name === 'TimeoutError' || error.name === 'AbortError'
+        ? `AI request timed out after ${timeoutMs}ms`
+        : error.message,
       processingTimeMs: Date.now() - startTime
     };
   }

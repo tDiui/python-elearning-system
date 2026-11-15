@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -20,11 +20,12 @@ type PathItem = {
   durationMinutes: number;
   isLocked: boolean;
   isCompleted?: boolean;
-  targetType?: 'Lesson' | 'Exercise';
+  targetType?: 'Lesson' | 'Exercise' | 'Quiz';
   targetId?: number | null;
 };
 
 type CurrentCourseProgress = {
+  courseId: number;
   courseName: string;
   chapterInfo: string;
   progressPercent: number;
@@ -33,14 +34,23 @@ type CurrentCourseProgress = {
   nextLessonId?: number | null;
 };
 
+type DashboardCourse = {
+  id: number;
+  title: string;
+};
+
 type StudentDashboardData = {
   fullName?: string;
   overallMastery?: number;
+  hasMasteryData?: boolean;
   totalLessonsLearned?: number;
   avgScore?: number;
+  hasScoreData?: boolean;
   studyTimeHours?: number;
+  hasStudyTimeData?: boolean;
   completedExercises?: number;
   currentCourse?: CurrentCourseProgress | null;
+  availableCourses?: DashboardCourse[];
   learningPath?: PathItem[];
   learningPathTitle?: string | null;
   learningPathSource?: 'AI' | 'Fallback' | null;
@@ -53,6 +63,9 @@ export default function StudentDashboard() {
   const [data, setData] = useState<StudentDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [courseLoading, setCourseLoading] = useState(false);
+  const [courseError, setCourseError] = useState('');
 
   // GỌI API LẤY DỮ LIỆU THẬT
   useEffect(() => {
@@ -73,6 +86,7 @@ export default function StudentDashboard() {
           throw new Error(result.message || 'Không thể tải dữ liệu Dashboard.');
         }
         setData(result.data);
+        setSelectedCourseId(result.data.currentCourse ? String(result.data.currentCourse.courseId) : '');
       } catch (error) {
         console.error('Lỗi tải dữ liệu:', error);
         setError(error instanceof Error ? error.message : 'Không thể tải dữ liệu Dashboard.');
@@ -83,6 +97,42 @@ export default function StudentDashboard() {
 
     fetchDashboard();
   }, [router]);
+
+  const handleCourseChange = async (event: ChangeEvent<HTMLSelectElement>) => {
+    const courseId = event.currentTarget.value;
+    if (!courseId) return;
+
+    const previousCourseId = selectedCourseId;
+    setSelectedCourseId(courseId);
+    setCourseLoading(true);
+    setCourseError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        router.push('/login');
+        return;
+      }
+
+      const response = await fetch(
+        `http://localhost:5000/api/student/dashboard?courseId=${encodeURIComponent(courseId)}`,
+        { headers: { Authorization: ['Bearer', token].join(' ') } }
+      );
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Không thể tải tiến độ khóa học.');
+      }
+
+      setData(result.data);
+      setSelectedCourseId(String(result.data.currentCourse?.courseId || courseId));
+    } catch (requestError) {
+      console.error('Lỗi tải tiến độ khóa học trên Dashboard:', requestError);
+      setSelectedCourseId(previousCourseId);
+      setCourseError(requestError instanceof Error ? requestError.message : 'Không thể tải tiến độ khóa học.');
+    } finally {
+      setCourseLoading(false);
+    }
+  };
 
   // Hàm tạo màu sắc dựa trên độ khó của bài học
   const getDifficultyStyles = (difficulty: string) => {
@@ -136,7 +186,9 @@ export default function StudentDashboard() {
             </div>
             <div className="flex gap-8 text-right">
               <div>
-                <p className="text-3xl font-bold">{data?.overallMastery ?? 0}%</p>
+                <p className="text-3xl font-bold">
+                  {data?.hasMasteryData ? `${data.overallMastery ?? 0}%` : '—'}
+                </p>
                 <p className="text-blue-100 text-xs mt-1">Overall Mastery</p>
               </div>
               <div>
@@ -150,6 +202,25 @@ export default function StudentDashboard() {
           {data?.currentCourse ? (
             <div className="bg-white/10 rounded-xl p-4 flex items-center justify-between backdrop-blur-sm border border-white/10">
               <div className="flex-1 mr-8">
+                {(data.availableCourses?.length || 0) > 1 && (
+                  <label className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-blue-100">
+                    <span>Khóa học đang xem</span>
+                    <select
+                      value={selectedCourseId || String(data.currentCourse.courseId)}
+                      onChange={handleCourseChange}
+                      disabled={courseLoading}
+                      className="max-w-full rounded-md border border-white/20 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-900 outline-none focus:ring-2 focus:ring-blue-200 disabled:opacity-70"
+                    >
+                      {data.availableCourses?.map((availableCourse) => (
+                        <option key={availableCourse.id} value={availableCourse.id}>
+                          {availableCourse.title}
+                        </option>
+                      ))}
+                    </select>
+                    {courseLoading && <span role="status">Đang tải...</span>}
+                  </label>
+                )}
+                {courseError && <p role="alert" className="mb-2 text-xs text-red-100">{courseError}</p>}
                 <p className="font-semibold text-sm">{data.currentCourse.courseName}</p>
                 <p className="text-xs text-blue-200 mb-3">{data.currentCourse.chapterInfo}</p>
                 <div className="w-full bg-black/20 rounded-full h-1.5">
@@ -220,7 +291,11 @@ export default function StudentDashboard() {
                       </div>
                       <p className={`text-xs ${item.isLocked ? 'text-gray-400' : 'text-gray-500'}`}>✦ {item.reason}</p>
                     </div>
-                    <div className="text-xs text-gray-400 flex items-center gap-1 mr-2">⏱ {item.durationMinutes} phút</div>
+                    <div className="text-xs text-gray-400 flex items-center gap-1 mr-2">
+                      {item.durationMinutes > 0
+                        ? `⏱ ${item.durationMinutes} phút`
+                        : item.targetType === 'Lesson' ? 'Chưa đặt thời lượng' : ''}
+                    </div>
                     <button
                       type="button"
                       disabled={item.isLocked || item.isCompleted || !item.targetId}
@@ -228,7 +303,9 @@ export default function StudentDashboard() {
                         if (item.targetId && item.targetType) {
                           router.push(item.targetType === 'Lesson'
                             ? `/student/lesson/${item.targetId}`
-                            : `/student/exercises/${item.targetId}`);
+                            : item.targetType === 'Quiz'
+                              ? `/student/quiz/${item.targetId}`
+                              : `/student/exercises/${item.targetId}`);
                         }
                       }}
                       className={`${item.isLocked || item.isCompleted || !item.targetId ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'} px-4 py-2 rounded-lg text-sm font-medium`}
@@ -263,12 +340,16 @@ export default function StudentDashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-3 bg-gray-50 rounded-xl">
                 <span className="text-red-500 text-lg mb-1 block">🎯</span>
-                <p className="text-xl font-bold text-gray-900">{data?.avgScore ?? 0}%</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {data?.hasScoreData ? `${data.avgScore ?? 0}%` : '—'}
+                </p>
                 <p className="text-[10px] text-gray-500">Avg Score ~</p>
               </div>
               <div className="p-3 bg-gray-50 rounded-xl">
                 <span className="text-gray-600 text-lg mb-1 block">⏱️</span>
-                <p className="text-xl font-bold text-gray-900">{data?.studyTimeHours ?? 0}h</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {data?.hasStudyTimeData ? `${data.studyTimeHours ?? 0}h` : '—'}
+                </p>
                 <p className="text-[10px] text-gray-500">Study Time ~</p>
               </div>
               <div className="p-3 bg-gray-50 rounded-xl">
@@ -313,13 +394,13 @@ export default function StudentDashboard() {
             )}
           </div>
 
-          {/* DỮ LIỆU ĐỘNG 4: AI INSIGHT (Chỉ hiện ra khi có dữ liệu thật) */}
+          {/* Nhận định được tạo bằng quy tắc từ số liệu học tập */}
           {data?.aiInsight && (
             <div className="bg-blue-50/50 rounded-2xl p-5 border border-blue-100">
               <div className="flex gap-3">
                 <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 text-xs">✦</div>
                 <div>
-                  <h4 className="text-sm font-bold text-gray-900 mb-1">AI Insight</h4>
+                  <h4 className="text-sm font-bold text-gray-900 mb-1">Nhận định học tập</h4>
                   <p className="text-xs text-gray-600 leading-relaxed mb-2">
                     {data.aiInsight}
                   </p>

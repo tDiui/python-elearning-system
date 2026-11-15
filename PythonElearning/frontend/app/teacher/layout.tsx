@@ -42,6 +42,16 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     fetchLayoutData();
   }, [router]);
 
+  useEffect(() => {
+    const handleProfileUpdated = (event: Event) => {
+      const account = (event as CustomEvent<{ fullName?: string }>).detail;
+      if (account?.fullName) setUserName(account.fullName);
+    };
+
+    window.addEventListener('account-profile-updated', handleProfileUpdated);
+    return () => window.removeEventListener('account-profile-updated', handleProfileUpdated);
+  }, []);
+
   // Danh sách các menu điều hướng
   const menuItems = [
     { title: 'Dashboard', path: '/teacher/dashboard', icon: '⊞' },
@@ -51,6 +61,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     { title: 'Quản lý đăng ký', path: '/teacher/enrollments', icon: '👥' },
     { title: 'Analytics', path: '/teacher/analytics', icon: '📊' },
     { title: 'Profile', path: '/teacher/profile', icon: '👤' },
+    { title: 'Settings', path: '/teacher/settings', icon: '⚙️' },
   ];
 
   return (

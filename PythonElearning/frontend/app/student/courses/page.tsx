@@ -9,7 +9,7 @@ type Lesson = {
   id: number;
   title: string;
   duration: string;
-  status: 'completed' | 'in-progress' | 'locked';
+  status: 'completed' | 'in-progress' | 'not-started' | 'locked';
 };
 
 type Chapter = {
@@ -17,7 +17,7 @@ type Chapter = {
   title: string;
   completedLessons: number;
   totalLessons: number;
-  status: 'completed' | 'in-progress' | 'locked';
+  status: 'completed' | 'in-progress' | 'not-started' | 'locked';
   lessons: Lesson[];
 };
 
@@ -36,7 +36,8 @@ type CourseData = {
   completedCount: number;
   inProgressCount: number;
   remainingCount: number;
-  nextLesson: { chapterName: string; lessonName: string; duration: string } | null;
+  nextLesson: { id: number; chapterName: string; lessonName: string; duration: string } | null;
+  availableCourses: Array<{ id: number; title: string; category: string }>;
   chapters: Chapter[];
 };
 
@@ -44,6 +45,7 @@ export default function CoursesPage() {
   const router = useRouter();
   const [data, setData] = useState<CourseData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [courseError, setCourseError] = useState('');
   const handleLessonClick = (lessonId: number, status: string) => {
     if (status === 'locked') {
       alert('🔒 Bài học này đang bị khóa. Bạn cần hoàn thành bài học trước đó!');
@@ -53,6 +55,32 @@ export default function CoursesPage() {
     // Chuyển hướng sang trang chi tiết bài học. 
     // Giả sử đường dẫn trang học của bạn là /student/lesson/[id]
     router.push(`/student/lesson/${lessonId}`);
+  };
+
+  const selectCourse = async (courseId: number) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/login');
+      return;
+    }
+
+    setLoading(true);
+    setCourseError('');
+    try {
+      const response = await fetch(`http://localhost:5000/api/student/courses?courseId=${courseId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success || !payload.data) {
+        throw new Error(payload.message || 'Không thể tải khóa học đã chọn.');
+      }
+      setData(payload.data);
+    } catch (requestError) {
+      console.error('Lỗi chuyển khóa học:', requestError);
+      setCourseError(requestError instanceof Error ? requestError.message : 'Không thể tải khóa học đã chọn.');
+    } finally {
+      setLoading(false);
+    }
   };
   // GỌI API LẤY DỮ LIỆU TỪ BACKEND
   useEffect(() => {
@@ -98,7 +126,9 @@ export default function CoursesPage() {
         </div>
       );
     }
-    // locked
+    if (status !== 'locked') {
+      return <div className="w-6 h-6 rounded-full border-2 border-gray-200 shrink-0" />;
+    }
     return (
       <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0 border border-gray-200">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
@@ -123,7 +153,7 @@ export default function CoursesPage() {
         <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center text-5xl mb-6 shadow-inner">📚</div>
         <h2 className="text-2xl font-bold text-gray-900 mb-3">Chưa có khóa học nào</h2>
         <p className="text-gray-500 mb-8 max-w-md leading-relaxed">Bạn chưa đăng ký tham gia khóa học Python nào. Hãy khám phá danh mục khóa học của chúng tôi để bắt đầu hành trình lập trình của bạn.</p>
-        <Link href="#" className="bg-blue-600 text-white px-8 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors shadow-md">
+        <Link href="/student/explore" className="bg-blue-600 text-white px-8 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors shadow-md">
           Khám phá danh sách khóa học
         </Link>
       </div>
@@ -150,7 +180,12 @@ export default function CoursesPage() {
                 <h1 className="text-2xl font-bold">{data.title}</h1>
               </div>
             </div>
-            <button className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition-colors flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => data.nextLesson && router.push(`/student/lesson/${data.nextLesson.id}`)}
+              disabled={!data.nextLesson}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
               ▶ Tiếp tục học
             </button>
           </div>
@@ -158,6 +193,21 @@ export default function CoursesPage() {
 
         {/* Nửa dưới nền trắng */}
         <div className="p-8 pb-6">
+          {data.availableCourses.length > 1 && (
+            <label className="mb-5 flex max-w-md flex-col gap-2 text-sm font-semibold text-gray-700">
+              Khóa học đã được ghi danh
+              <select
+                value={data.id}
+                onChange={(event) => void selectCourse(Number(event.target.value))}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+              >
+                {data.availableCourses.map(course => (
+                  <option key={course.id} value={course.id}>{course.title} · {course.category}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {courseError && <p role="alert" className="mb-4 text-sm text-red-600">{courseError}</p>}
           <p className="text-gray-600 text-sm mb-6 leading-relaxed">
             {data.description}
           </p>
@@ -293,7 +343,11 @@ export default function CoursesPage() {
                   <span>⏱</span> {data.nextLesson.duration}
                 </p>
               </div>
-              <button className="w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-blue-700 transition-colors flex justify-center items-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.push(`/student/lesson/${data.nextLesson?.id}`)}
+                className="w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-blue-700 transition-colors flex justify-center items-center gap-2"
+              >
                 ▶ Học ngay
               </button>
             </div>

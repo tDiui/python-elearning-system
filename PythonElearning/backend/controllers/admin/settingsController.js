@@ -75,6 +75,22 @@ const readSettings = async (key) => {
   }
 };
 
+const getRuntimeAISettings = async () => {
+  const key = getEncryptionKey();
+  if (!key) {
+    try {
+      await fs.access(settingsFile);
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
+    throw new Error('Thiếu SYSTEM_SETTINGS_ENCRYPTION_KEY; không thể đọc cấu hình AI đã lưu.');
+  }
+
+  const settings = await readSettings(key);
+  return settings.provider && settings.model && settings.apiKey ? settings : null;
+};
+
 const writeSettings = async (settings, key) => {
   const directory = path.dirname(settingsFile);
   await fs.mkdir(directory, { recursive: true });
@@ -214,4 +230,4 @@ const updateSystemSettings = async (req, res) => {
   }
 };
 
-module.exports = { getSystemSettings, updateSystemSettings };
+module.exports = { getSystemSettings, updateSystemSettings, getRuntimeAISettings };

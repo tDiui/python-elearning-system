@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import QuestionBankPanel, { type BankQuestion } from './QuestionBankPanel';
 
 // ==========================================
 // 1. KHAI BÁO TYPE CHO TYPESCRIPT
@@ -43,17 +44,55 @@ interface Quiz {
   passRate: number;
 }
 
+interface QuizAttemptSummary {
+  id: number;
+  studentName: string;
+  studentEmail: string;
+  studentId: string | null;
+  startedAt: string;
+  submittedAt: string | null;
+  totalScore: number;
+  maxScore: number;
+  gradingStatus: string;
+  questionCount: number;
+}
+
+interface QuizAttemptDetail extends Omit<QuizAttemptSummary, 'id'> {
+  attemptId: number;
+  quizTitle: string;
+  instructorFeedback: string;
+  questions: Array<{
+    question: string;
+    type: string;
+    points: number;
+    scoreEarned: number;
+    isCorrect: boolean;
+    selectedAnswer: string | boolean | null;
+    correctAnswers: string[];
+    options: Array<{ content: string; isCorrect: boolean; isSelected: boolean }>;
+    explanation: string | null;
+  }>;
+}
+
 interface QuizTabProps {
+  courseId: number;
   onAddQuiz: () => void;
 }
 
-export default function QuizTab({ onAddQuiz }: QuizTabProps) {
+export default function QuizTab({ courseId, onAddQuiz }: QuizTabProps) {
   // ==========================================
   // 2. STATE QUẢN LÝ DỮ LIỆU
   // ==========================================
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);
+  const [attemptsQuiz, setAttemptsQuiz] = useState<Quiz | null>(null);
+  const [quizAttempts, setQuizAttempts] = useState<QuizAttemptSummary[]>([]);
+  const [activeAttempt, setActiveAttempt] = useState<QuizAttemptDetail | null>(null);
+  const [attemptsLoading, setAttemptsLoading] = useState(false);
+  const [attemptsError, setAttemptsError] = useState('');
+  const [questionBankMode, setQuestionBankMode] = useState<'manage' | 'select' | null>(null);
+  const [quizEditorError, setQuizEditorError] = useState('');
 
   const fetchQuizzes = async () => {
     try {
@@ -86,8 +125,11 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
   useEffect(() => { void fetchQuizzes(); }, []);
 
   // Hàm gọi API cập nhật Quiz (Cả trạng thái, thời gian, và nội dung câu hỏi)
-  const handleUpdateQuiz = async (field: keyof Quiz | 'config', value: any) => {
-    if (!activeQuiz) return;
+  const handleUpdateQuiz = async (
+    field: keyof Quiz | 'config',
+    value: string | number | QuizConfig
+  ) => {
+    if (!activeQuiz) return false;
     
     // Tạo bản sao của Quiz hiện tại với dữ liệu mới
     const updatedQuiz = { ...activeQuiz, [field]: value };
@@ -96,7 +138,7 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
       const token = localStorage.getItem('token');
       // Ở backend, để update Quiz, ta tận dụng lại API update Exercise (vì chung bảng)
       // Nhưng đối với config, ta cần chuỗi hóa JSON
-      const payload: any = {};
+      const payload: Record<string, unknown> = {};
       
       if (field === 'config') {
         payload.QuizConfig = JSON.stringify(value);
@@ -108,15 +150,94 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
          payload.title = value;
       }
 
-      await fetch(`http://localhost:5000/api/teacher/exercise/${activeQuiz.id}`, {
+      const response = await fetch(`http://localhost:5000/api/teacher/exercise/${activeQuiz.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload)
       });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Không thể cập nhật bài kiểm tra.');
+      }
       
       setActiveQuiz(updatedQuiz);
-      fetchQuizzes();
-    } catch (error) { console.error('Lỗi cập nhật Quiz', error); }
+      setQuizEditorError('');
+      void fetchQuizzes();
+      return true;
+    } catch (error) {
+      console.error('Lỗi cập nhật Quiz', error);
+      setQuizEditorError(error instanceof Error ? error.message : 'Không thể cập nhật bài kiểm tra.');
+      return false;
+    }
+  };
+
+  const handleUseBankQuestion = async (bankQuestion: BankQuestion) => {
+    if (!activeQuiz) return;
+    const newQuestion: Question = {
+      ...bankQuestion,
+      id: `${bankQuestion.id}-${Date.now()}`,
+      options: bankQuestion.options?.map((option) => ({ ...option }))
+    };
+    const newConfig: QuizConfig = {
+      ...activeQuiz.config,
+      types: {
+        multipleChoice: activeQuiz.config.types?.multipleChoice ?? 0,
+        trueFalse: activeQuiz.config.types?.trueFalse ?? 0,
+        fillIn: activeQuiz.config.types?.fillIn ?? 0,
+        essay: activeQuiz.config.types?.essay ?? 0
+      },
+      questions: [...(activeQuiz.config.questions || []), newQuestion]
+    };
+    newConfig.types[newQuestion.type] += 1;
+    newConfig.questionCount = newConfig.questions.length;
+    if (await handleUpdateQuiz('config', newConfig)) setQuestionBankMode(null);
+  };
+
+  const handleShowAttempts = async (quiz: Quiz) => {
+    setAttemptsQuiz(quiz);
+    setActiveAttempt(null);
+    setQuizAttempts([]);
+    setAttemptsError('');
+    setAttemptsLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/teacher/quiz/${quiz.id}/attempts`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Không thể tải danh sách lượt làm.');
+      }
+      setQuizAttempts(payload.data);
+    } catch (error) {
+      console.error('Lỗi tải lượt làm quiz:', error);
+      setAttemptsError(error instanceof Error ? error.message : 'Không thể tải danh sách lượt làm.');
+    } finally {
+      setAttemptsLoading(false);
+    }
+  };
+
+  const handleShowAttemptDetail = async (attemptId: number) => {
+    if (!attemptsQuiz) return;
+    setAttemptsLoading(true);
+    setAttemptsError('');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        `http://localhost:5000/api/teacher/quiz/${attemptsQuiz.id}/attempts/${attemptId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Không thể tải chi tiết lượt làm.');
+      }
+      setActiveAttempt(payload.data);
+    } catch (error) {
+      console.error('Lỗi tải chi tiết lượt làm quiz:', error);
+      setAttemptsError(error instanceof Error ? error.message : 'Không thể tải chi tiết lượt làm.');
+    } finally {
+      setAttemptsLoading(false);
+    }
   };
 
   // Hàm thêm câu hỏi mới
@@ -168,7 +289,7 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
   };
 
   // Hàm cập nhật nội dung một câu hỏi cụ thể
-  const updateQuestion = (qIndex: number, field: keyof Question, value: any) => {
+  const updateQuestion = (qIndex: number, field: keyof Question, value: Question[keyof Question]) => {
     if (!activeQuiz) return;
     const newConfig = { ...activeQuiz.config };
     newConfig.questions[qIndex] = { ...newConfig.questions[qIndex], [field]: value };
@@ -198,6 +319,167 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
 
   if (loading) return <div className="text-center py-10">Đang tải danh sách bài kiểm tra...</div>;
 
+  if (questionBankMode === 'manage' && !activeQuiz) {
+    return (
+      <QuestionBankPanel
+        courseId={courseId}
+        mode="manage"
+        onClose={() => setQuestionBankMode(null)}
+      />
+    );
+  }
+
+  if (questionBankMode === 'select' && activeQuiz) {
+    return (
+      <div>
+        {quizEditorError && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{quizEditorError}</p>}
+        <QuestionBankPanel
+          courseId={courseId}
+          mode="select"
+          onClose={() => setQuestionBankMode(null)}
+          onSelectQuestion={(question) => void handleUseBankQuestion(question)}
+        />
+      </div>
+    );
+  }
+
+  if (attemptsQuiz) {
+    if (activeAttempt) {
+      return (
+        <div className="mx-auto max-w-5xl pb-12">
+          <button
+            type="button"
+            onClick={() => { setActiveAttempt(null); setAttemptsError(''); }}
+            className="mb-5 text-sm font-semibold text-blue-700 hover:text-blue-900"
+          >
+            ← Quay lại danh sách lượt làm
+          </button>
+          <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-100 pb-5">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">{activeAttempt.quizTitle}</h1>
+                <p className="mt-1 text-sm text-gray-600">
+                  {activeAttempt.studentName} · {activeAttempt.studentEmail}
+                  {activeAttempt.studentId ? ` · MSSV ${activeAttempt.studentId}` : ''}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Nộp bài: {activeAttempt.submittedAt ? new Date(activeAttempt.submittedAt).toLocaleString('vi-VN') : 'Chưa nộp'}
+                  {' · '}Trạng thái: {activeAttempt.gradingStatus}
+                </p>
+              </div>
+              <p className="rounded-lg bg-blue-50 px-4 py-2 text-sm font-bold text-blue-800">
+                Điểm: {activeAttempt.totalScore}/{activeAttempt.maxScore}
+              </p>
+            </div>
+
+            {activeAttempt.instructorFeedback && (
+              <div className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
+                <strong>Nhận xét giảng viên:</strong> {activeAttempt.instructorFeedback}
+              </div>
+            )}
+
+            <div className="mt-6 space-y-4">
+              {activeAttempt.questions.map((question, index) => (
+                <article key={`${activeAttempt.attemptId}-${index}`} className="rounded-xl border border-gray-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h2 className="font-semibold text-gray-900">{index + 1}. {question.question}</h2>
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      question.isCorrect ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                    }`}>
+                      {question.isCorrect ? 'Đúng' : question.type === 'essay' && activeAttempt.gradingStatus !== 'Published' ? 'Chờ chấm' : 'Chưa đúng'}
+                      {' · '}{question.scoreEarned}/{question.points} điểm
+                    </span>
+                  </div>
+                  <p className="mt-3 text-xs font-medium text-gray-500">Câu trả lời của học viên</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                    {question.selectedAnswer === null || question.selectedAnswer === ''
+                      ? 'Không có câu trả lời'
+                      : String(question.selectedAnswer)}
+                  </p>
+                  {question.options.length > 0 && (
+                    <ul className="mt-3 space-y-1.5">
+                      {question.options.map((option, optionIndex) => (
+                        <li
+                          key={`${optionIndex}-${option.content}`}
+                          className={`rounded-md px-3 py-2 text-sm ${
+                            option.isCorrect
+                              ? 'bg-emerald-50 text-emerald-800'
+                              : option.isSelected
+                                ? 'bg-rose-50 text-rose-800'
+                                : 'bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          {option.isSelected ? 'Đã chọn · ' : ''}{option.content}
+                          {option.isCorrect ? ' · Đáp án đúng' : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {question.correctAnswers.length > 0 && question.options.length === 0 && (
+                    <p className="mt-2 text-sm text-emerald-700">
+                      Đáp án đúng: {question.correctAnswers.join(', ')}
+                    </p>
+                  )}
+                  {question.explanation && (
+                    <p className="mt-3 text-sm text-gray-600">Giải thích: {question.explanation}</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mx-auto max-w-5xl pb-12">
+        <button
+          type="button"
+          onClick={() => { setAttemptsQuiz(null); setQuizAttempts([]); setAttemptsError(''); }}
+          className="mb-5 text-sm font-semibold text-blue-700 hover:text-blue-900"
+        >
+          ← Quay lại danh sách bài kiểm tra
+        </button>
+        <div className="mb-5">
+          <h1 className="text-2xl font-bold text-gray-900">Lượt làm: {attemptsQuiz.title}</h1>
+          <p className="mt-1 text-sm text-gray-500">Chọn một lượt làm để xem câu trả lời chi tiết.</p>
+        </div>
+        {attemptsError && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{attemptsError}</p>}
+        {attemptsLoading ? (
+          <p className="py-8 text-center text-sm text-gray-500">Đang tải...</p>
+        ) : quizAttempts.length ? (
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {quizAttempts.map((attempt) => (
+              <button
+                type="button"
+                key={attempt.id}
+                onClick={() => void handleShowAttemptDetail(attempt.id)}
+                className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-4 text-left last:border-b-0 hover:bg-blue-50"
+              >
+                <span>
+                  <span className="block font-semibold text-gray-900">{attempt.studentName}</span>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    {attempt.studentEmail} · {attempt.submittedAt
+                      ? new Date(attempt.submittedAt).toLocaleString('vi-VN')
+                      : 'Chưa nộp'}
+                  </span>
+                </span>
+                <span className="text-right">
+                  <span className="block font-bold text-gray-900">{attempt.totalScore}/{attempt.maxScore} điểm</span>
+                  <span className="mt-1 block text-xs text-gray-500">{attempt.gradingStatus} · {attempt.questionCount} câu</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
+            Chưa có lượt làm bài kiểm tra này.
+          </p>
+        )}
+      </div>
+    );
+  }
+
   // ==========================================
   // GIAO DIỆN 1: DANH SÁCH BÀI KIỂM TRA (GRID)
   // ==========================================
@@ -210,9 +492,14 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
             <h1 className="text-2xl font-bold text-gray-900 mb-1">Bài kiểm tra</h1>
             <p className="text-sm text-gray-500">{quizzes.length} quiz • {publishedCount} đã publish</p>
           </div>
-          <button onClick={onAddQuiz} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm flex items-center gap-2">
-            + Tạo quiz mới
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setQuestionBankMode('manage')} className="rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">
+              Ngân hàng câu hỏi
+            </button>
+            <button onClick={onAddQuiz} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm flex items-center gap-2">
+              + Tạo quiz mới
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -266,11 +553,21 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
               </div>
 
               <div className="flex justify-between items-center h-10">
-                {quiz.status === 'Draft' ? (
-                  <button onClick={() => setActiveQuiz(quiz)} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
-                    Mở editor
+                <div className="flex items-center gap-3">
+                  {quiz.status === 'Draft' && (
+                    <button onClick={() => setActiveQuiz(quiz)} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
+                      Mở editor
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleShowAttempts(quiz)}
+                    className="px-3 py-2 text-xs font-semibold text-blue-700 hover:underline"
+                  >
+                    Xem lượt làm ({quiz.attemptCount})
                   </button>
-                ) : (
+                </div>
+                {quiz.status !== 'Draft' && (
                   <div className="flex items-center gap-4 text-xs font-medium text-gray-500">
                     <span className="text-gray-900 font-bold">{quiz.studentCount}</span> sinh viên
                     <span className="text-gray-300">•</span>
@@ -377,11 +674,13 @@ export default function QuizTab({ onAddQuiz }: QuizTabProps) {
         <div className="flex justify-between items-center mb-8">
           <h3 className="font-bold text-gray-900 text-lg">Câu hỏi ({activeQuiz.config.questionCount})</h3>
           <div className="flex gap-4">
+            <button onClick={() => setQuestionBankMode('select')} className="text-xs font-semibold text-blue-600 hover:text-blue-800">+ Chọn từ ngân hàng</button>
             <button onClick={() => addQuestion('multipleChoice')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Trắc nghiệm</button>
             <button onClick={() => addQuestion('trueFalse')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Đúng/Sai</button>
             <button onClick={() => addQuestion('fillIn')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Điền vào</button>
             <button onClick={() => addQuestion('essay')} className="text-xs font-semibold text-gray-500 hover:text-blue-600">+ Tự luận</button>
           </div>
+          {quizEditorError && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{quizEditorError}</p>}
         </div>
 
           <div className="space-y-6">

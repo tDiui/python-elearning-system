@@ -48,16 +48,20 @@ type LearningPathStep = {
   durationMinutes: number;
   isCompleted: boolean;
   isLocked: boolean;
-  targetType: 'Lesson' | 'Exercise';
+  targetType: 'Lesson' | 'Exercise' | 'Quiz';
   targetId: number | null;
 };
 
 type Dashboard = {
   overallMastery?: number;
   avgScore?: number;
+  hasScoreData?: boolean;
   studyTimeHours?: number;
+  hasStudyTimeData?: boolean;
   totalLessonsLearned?: number;
   completedExercises?: number;
+  hasLearningActivity?: boolean;
+  learningPathStatus?: 'ready' | 'not_created';
   knowledgeMap?: KnowledgeSkill[];
   learningPath?: LearningPathStep[];
   learningPathTitle?: string | null;
@@ -194,7 +198,6 @@ export default function LearningPathPage() {
 
     setGenerating(true);
     setError('');
-    setGeneratedPath(null);
 
     try {
       const response = await fetch(GENERATE_PATH_ENDPOINT, {
@@ -358,7 +361,9 @@ export default function LearningPathPage() {
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl bg-gray-50 p-4">
                   <Target className="mb-3 h-5 w-5 text-rose-500" />
-                  <p className="text-xl font-bold text-gray-900">{dashboard?.avgScore ?? 0}%</p>
+                  <p className="text-xl font-bold text-gray-900">
+                    {dashboard?.hasScoreData ? `${dashboard.avgScore ?? 0}%` : '—'}
+                  </p>
                   <p className="mt-1 text-xs text-gray-500">Điểm trung bình</p>
                 </div>
                 <div className="rounded-xl bg-gray-50 p-4">
@@ -368,21 +373,29 @@ export default function LearningPathPage() {
                 </div>
                 <div className="rounded-xl bg-gray-50 p-4">
                   <Clock3 className="mb-3 h-5 w-5 text-amber-500" />
-                  <p className="text-xl font-bold text-gray-900">{dashboard?.studyTimeHours ?? 0}h</p>
+                  <p className="text-xl font-bold text-gray-900">
+                    {dashboard?.hasStudyTimeData ? `${dashboard.studyTimeHours ?? 0}h` : '—'}
+                  </p>
                   <p className="mt-1 text-xs text-gray-500">Thời gian học</p>
                 </div>
               </div>
 
+              {!dashboard?.hasLearningActivity && (
+                <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Hãy ghi nhận thời gian học, hoàn thành một bài học hoặc nộp bài tập/quiz trong khóa học trước khi tạo lộ trình.
+                </p>
+              )}
+
               <button
                 type="button"
                 onClick={handleGeneratePath}
-                disabled={generating}
+                disabled={generating || !dashboard?.hasLearningActivity}
                 className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 sm:w-auto"
               >
                 {generating ? (
                   <>
                     <LoaderCircle className="h-4 w-4 animate-spin" />
-                    AI đang phân tích dữ liệu; có thể mất vài phút...
+                    AI có tối đa 15 giây để phản hồi trước khi dùng phương án dự phòng...
                   </>
                 ) : (
                   <>
@@ -409,7 +422,9 @@ export default function LearningPathPage() {
                             const href = item.targetId
                               ? item.targetType === 'Lesson'
                                 ? `/student/lesson/${item.targetId}`
-                                : `/student/exercises/${item.targetId}`
+                                : item.targetType === 'Quiz'
+                                  ? `/student/quiz/${item.targetId}`
+                                  : `/student/exercises/${item.targetId}`
                               : null;
                             return (
                               <li key={item.id} className="rounded-lg bg-white/80 p-3">
@@ -418,7 +433,7 @@ export default function LearningPathPage() {
                                     {index + 1}. {item.title}
                                   </p>
                                   <span className="text-xs text-gray-500">
-                                    {item.targetType === 'Lesson' ? 'Bài học' : 'Bài tập'}
+                                    {item.targetType === 'Lesson' ? 'Bài học' : item.targetType === 'Quiz' ? 'Quiz' : 'Bài tập'}
                                     {item.durationMinutes > 0 ? ` · ${item.durationMinutes} phút` : ''}
                                   </span>
                                 </div>
@@ -439,6 +454,11 @@ export default function LearningPathPage() {
                     </div>
                   </div>
                 </div>
+              )}
+              {!generatedPath && dashboard?.learningPathStatus === 'not_created' && (
+                <p className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                  Khóa học này chưa có lộ trình đang hoạt động.
+                </p>
               )}
             </section>
           </div>

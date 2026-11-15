@@ -1,42 +1,56 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import Link from 'next/link';
 
 interface Enrollment {
   id: number;
+  studentUserId: number;
   studentName: string;
   email: string;
   studentId: string;
+  courseId: number;
   courseTitle: string;
   status: string;
   enrollmentDate: string;
-  experience: string;
-  aiMatch: number;
 }
+
+type Course = { id: number; title: string };
 
 export default function EnrollmentsPage() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'Pending' | 'Active' | 'Rejected' | 'All'>('Pending');
+  const [activeTab, setActiveTab] = useState<'Pending' | 'Active' | 'Rejected' | 'Removed' | 'All'>('Pending');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [newStudentId, setNewStudentId] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [addingStudent, setAddingStudent] = useState(false);
 
-  const fetchEnrollments = async () => {
+  const fetchEnrollments = useCallback(async () => {
+    setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:5000/api/teacher/enrollments', {
+      const query = selectedCourseId ? `?courseId=${selectedCourseId}` : '';
+      const res = await fetch(`http://localhost:5000/api/teacher/enrollments${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      if (data.success) setEnrollments(data.data);
+      if (!res.ok || !data.success) throw new Error(data.message || 'Không thể tải danh sách học viên.');
+      setEnrollments(data.data);
+      setCourses(data.courses || []);
+      setActionError('');
     } catch (err) {
       console.error(err);
+      setActionError(err instanceof Error ? err.message : 'Không thể tải danh sách học viên.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCourseId]);
 
-  useEffect(() => { fetchEnrollments(); }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void fetchEnrollments(); }, [fetchEnrollments]);
 
   const handleUpdateStatus = async (id: number, newStatus: 'Active' | 'Rejected') => {
     if (!window.confirm(`Bạn muốn ${newStatus === 'Active' ? 'DUYỆT' : 'TỪ CHỐI'} đơn đăng ký này?`)) return;
@@ -49,12 +63,51 @@ export default function EnrollmentsPage() {
         body: JSON.stringify({ status: newStatus })
       });
       const data = await res.json();
-      if (data.success) {
-        // Cập nhật state trực tiếp để UI phản hồi ngay lập tức
-        setEnrollments(prev => prev.map(en => en.id === id ? { ...en, status: newStatus } : en));
-      }
+      if (!res.ok || !data.success) throw new Error(data.message || 'Không thể cập nhật trạng thái ghi danh.');
+      setEnrollments(prev => prev.map(en => en.id === id ? { ...en, status: newStatus } : en));
+      setActionError('');
     } catch (err) {
-      alert('Lỗi cập nhật trạng thái');
+      setActionError(err instanceof Error ? err.message : 'Lỗi cập nhật trạng thái.');
+    }
+  };
+
+  const handleAddStudent = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedCourseId || !newStudentId.trim()) return;
+    setAddingStudent(true);
+    setActionError('');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/teacher/courses/${selectedCourseId}/students`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ studentId: newStudentId.trim() })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.message || 'Không thể thêm học viên.');
+      setNewStudentId('');
+      await fetchEnrollments();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Không thể thêm học viên.');
+    } finally {
+      setAddingStudent(false);
+    }
+  };
+
+  const handleRemoveStudent = async (enrollment: Enrollment) => {
+    if (!window.confirm(`Thu hồi quyền truy cập của ${enrollment.studentName}? Lịch sử ghi danh và tiến độ học tập vẫn được giữ lại.`)) return;
+    setActionError('');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/teacher/enrollments/${enrollment.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.message || 'Không thể thu hồi quyền truy cập.');
+      setEnrollments((current) => current.map((item) => item.id === enrollment.id ? { ...item, status: 'Removed' } : item));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Không thể thu hồi quyền truy cập.');
     }
   };
 
@@ -64,12 +117,15 @@ export default function EnrollmentsPage() {
   const pendingCount = enrollments.filter(e => e.status === 'Pending').length;
   const approvedCount = enrollments.filter(e => e.status === 'Active').length;
   const rejectedCount = enrollments.filter(e => e.status === 'Rejected').length;
-  const avgAiMatch = enrollments.length > 0 ? Math.round(enrollments.reduce((acc, e) => acc + e.aiMatch, 0) / enrollments.length) : 0;
+  const removedCount = enrollments.filter(e => e.status === 'Removed').length;
 
   // Lọc dữ liệu theo Tab và Search
   const filteredEnrollments = enrollments.filter(e => {
     const matchesTab = activeTab === 'All' || e.status === activeTab;
-    const matchesSearch = e.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || e.email.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = searchQuery.toLowerCase();
+    const matchesSearch = e.studentName.toLowerCase().includes(query) ||
+      e.email.toLowerCase().includes(query) ||
+      e.studentId.toLowerCase().includes(query);
     return matchesTab && matchesSearch;
   });
 
@@ -83,7 +139,7 @@ export default function EnrollmentsPage() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-2xl font-extrabold text-gray-900">Quản lý đăng ký</h1>
-            <p className="text-sm text-gray-500 mt-1">Đơn đăng ký các khóa học • {enrollments.length} đơn</p>
+            <p className="text-sm text-gray-500 mt-1">Học viên theo khóa học • {enrollments.length} ghi danh</p>
           </div>
           <div className="flex gap-3">
             <button className="px-5 py-2.5 bg-white border border-gray-200 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 shadow-sm">
@@ -97,8 +153,27 @@ export default function EnrollmentsPage() {
           </div>
         </div>
 
-        {/* 4 Thẻ thống kê */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <form onSubmit={handleAddStudent} className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-gray-200 bg-white p-5">
+          <label className="min-w-[220px] flex-1 text-sm font-semibold text-gray-700">
+            Khóa học
+            <select value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm">
+              <option value="">Tất cả khóa học</option>
+              {courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}
+            </select>
+          </label>
+          <label className="min-w-[200px] flex-1 text-sm font-semibold text-gray-700">
+            Mã số sinh viên
+            <input value={newStudentId} onChange={(event) => setNewStudentId(event.target.value)} placeholder="Nhập MSSV" className="mt-1.5 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm" />
+          </label>
+          <button type="submit" disabled={!selectedCourseId || !newStudentId.trim() || addingStudent} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+            {addingStudent ? 'Đang thêm...' : 'Thêm học viên'}
+          </button>
+        </form>
+
+        {actionError && <p role="alert" className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</p>}
+
+        {/* Thẻ thống kê */}
+        <div className="grid grid-cols-2 gap-4 mb-8 md:grid-cols-4">
           <div className="bg-amber-50/50 border border-amber-100 p-5 rounded-2xl">
             <div className="text-2xl mb-2">⏳</div>
             <div className="text-3xl font-extrabold text-amber-600 mb-1">{pendingCount}</div>
@@ -114,10 +189,10 @@ export default function EnrollmentsPage() {
             <div className="text-3xl font-extrabold text-red-600 mb-1">{rejectedCount}</div>
             <div className="text-sm font-medium text-red-700">Từ chối</div>
           </div>
-          <div className="bg-blue-50/50 border border-blue-100 p-5 rounded-2xl">
-            <div className="text-2xl mb-2">✨</div>
-            <div className="text-3xl font-extrabold text-blue-600 mb-1">{avgAiMatch}%</div>
-            <div className="text-sm font-medium text-blue-700">AI Match TB</div>
+          <div className="bg-gray-50 border border-gray-200 p-5 rounded-2xl">
+            <div className="text-2xl mb-2">↩️</div>
+            <div className="text-3xl font-extrabold text-gray-600 mb-1">{removedCount}</div>
+            <div className="text-sm font-medium text-gray-700">Đã thu hồi quyền</div>
           </div>
         </div>
 
@@ -132,6 +207,9 @@ export default function EnrollmentsPage() {
             </button>
             <button onClick={() => setActiveTab('Rejected')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'Rejected' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Từ chối <span className="ml-1 bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{rejectedCount}</span>
+            </button>
+            <button onClick={() => setActiveTab('Removed')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'Removed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              Đã thu hồi <span className="ml-1 bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{removedCount}</span>
             </button>
             <button onClick={() => setActiveTab('All')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'All' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               Tất cả <span className="ml-1 bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{enrollments.length}</span>
@@ -176,30 +254,8 @@ export default function EnrollmentsPage() {
                   </div>
                 </div>
 
-                {/* Experience */}
-                <div className="w-1/3 px-4 border-l border-gray-100">
-                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Kinh nghiệm</p>
-                   <p className="text-xs text-gray-600 font-medium leading-relaxed">{en.experience}</p>
-                </div>
-
-                {/* AI Match & Actions */}
-                <div className="flex items-center gap-6 w-1/3 justify-end border-l border-gray-100 pl-4">
-                  <div className="text-center">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Điểm TQ</p>
-                    <div className="flex items-center justify-center gap-2">
-                       <span className="text-lg font-extrabold text-gray-900">82%</span>
-                    </div>
-                  </div>
-                  
-                  <div className={`px-4 py-1.5 rounded-lg border flex flex-col items-center justify-center min-w-[80px]
-                    ${en.aiMatch >= 80 ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 
-                      en.aiMatch >= 60 ? 'bg-amber-50 border-amber-100 text-amber-600' : 
-                      'bg-red-50 border-red-100 text-red-600'}`}
-                  >
-                     <span className="text-lg font-extrabold">{en.aiMatch}%</span>
-                     <span className="text-[9px] font-bold uppercase tracking-wider opacity-80">★ AI Match</span>
-                  </div>
-
+                {/* Enrollment actions */}
+                <div className="flex items-center gap-3 justify-end border-l border-gray-100 pl-4">
                   <div className="flex gap-2">
                     {en.status === 'Pending' && (
                       <>
@@ -211,12 +267,20 @@ export default function EnrollmentsPage() {
                         </button>
                       </>
                     )}
-                    {en.status === 'Active' && <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100">Đã duyệt</span>}
+                    {en.status === 'Active' && (
+                      <>
+                        <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100">Đang hoạt động</span>
+                        <button onClick={() => void handleRemoveStudent(en)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">Thu hồi</button>
+                      </>
+                    )}
                     {en.status === 'Rejected' && <span className="text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">Đã từ chối</span>}
+                    {en.status === 'Removed' && <span className="text-xs font-bold text-gray-600 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200">Đã thu hồi</span>}
                     
-                    <button className="w-9 h-9 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-50 flex items-center justify-center transition-colors font-bold">
-                      ›
-                    </button>
+                    {['Active', 'Removed'].includes(en.status) && (
+                      <Link href={`/teacher/dashboard/students/${en.courseId}/${en.studentUserId}`} aria-label={`Xem tiến độ của ${en.studentName}`} className="w-9 h-9 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-50 flex items-center justify-center transition-colors font-bold">
+                        ›
+                      </Link>
+                    )}
                   </div>
                 </div>
 
