@@ -65,6 +65,7 @@ model Courses {
   LearningActivities   LearningActivities[]
   LearningPaths        LearningPaths[]
   LearningProfiles     LearningProfiles[]
+  QuestionBankQuestions QuestionBankQuestions[]
   StudentLearningStats StudentLearningStats[]
 }
 
@@ -117,6 +118,21 @@ model KnowledgeTopics {
   TestQuestions        TestQuestions[]
 
   @@unique([CourseID, TopicName], map: "UQ_KnowledgeTopics_Course_Topic")
+}
+
+model QuestionBankQuestions {
+  QuestionBankQuestionID Int      @id(map: "PK_QuestionBankQuestions") @default(autoincrement())
+  CourseID               Int
+  QuestionType           String   @db.NVarChar(50)
+  Content                String   @db.NVarChar(Max)
+  Points                 Decimal  @default(1.00) @db.Decimal(5, 2)
+  Explanation            String?  @db.NVarChar(Max)
+  OptionsJSON            String   @db.NVarChar(Max)
+  CreatedAt              DateTime @default(dbgenerated("sysdatetime()"))
+  UpdatedAt              DateTime @default(dbgenerated("sysdatetime()"))
+  Courses                Courses  @relation(fields: [CourseID], references: [CourseID], onDelete: Cascade, onUpdate: NoAction, map: "FK_QuestionBankQuestions_Courses")
+
+  @@index([CourseID], map: "IX_QuestionBankQuestions_CourseID")
 }
 
 model LearningActivities {
@@ -193,6 +209,7 @@ model Lessons {
   LessonID           Int                  @id(map: "PK__Lessons__B084ACB06AF37D48") @default(autoincrement())
   ChapterID          Int
   Title              String               @db.NVarChar(200)
+  Status             String               @default("Draft", map: "DF_Lessons_Status") @db.NVarChar(50)
   OrderIndex         Int                  @default(0)
   ArticleContent     String?              @db.NVarChar(Max)
   Difficulty         String?              @db.NVarChar(50)

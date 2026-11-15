@@ -64,9 +64,12 @@ export default function RegisterPage() {
 
       if (data.success) {
         setMessage({ type: 'success', text: 'Đăng ký thành công! Đang chuyển trang...' });
-        // Chờ 1.5 giây để hiện thông báo rồi chuyển về trang Login
+        const returnUrl = sessionStorage.getItem('enrollment-return-url');
+        const loginPath = returnUrl?.startsWith('/student/') && !returnUrl.startsWith('//')
+          ? `/login?returnUrl=${encodeURIComponent(returnUrl)}`
+          : '/login';
         setTimeout(() => {
-          router.push('/login');
+          router.push(loginPath);
         }, 1500);
       } else {
         setMessage({ type: 'error', text: data.message });
@@ -100,14 +103,14 @@ export default function RegisterPage() {
         {/* Thêm onSubmit vào form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex gap-4">
-            <Input label="Họ" name="firstName" value={formData.firstName} onChange={handleChange} required />
-            <Input label="Tên" name="lastName" value={formData.lastName} onChange={handleChange} required />
+            <Input label="Họ" name="firstName" value={formData.firstName} onChange={handleChange} required maxLength={100} />
+            <Input label="Tên" name="lastName" value={formData.lastName} onChange={handleChange} required maxLength={100} />
           </div>
           
-          <Input label="Email" type="email" name="email" value={formData.email} onChange={handleChange} required />
-          <Input label="Mã sinh viên" name="studentId" value={formData.studentId} onChange={handleChange} required />
-          <Input label="Mật khẩu" type="password" name="password" value={formData.password} onChange={handleChange} required minLength={6} />
-          <Input label="Xác nhận mật khẩu" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} required minLength={6} />
+          <Input label="Email" type="email" name="email" value={formData.email} onChange={handleChange} required maxLength={150} />
+          <Input label="Mã sinh viên" name="studentId" value={formData.studentId} onChange={handleChange} required maxLength={50} />
+          <Input label="Mật khẩu" type="password" name="password" value={formData.password} onChange={handleChange} required minLength={6} maxLength={128} />
+          <Input label="Xác nhận mật khẩu" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} required minLength={6} maxLength={128} />
 
           <div className="mt-2">
             {/* Đổi type thành submit và thêm hiệu ứng Loading */}

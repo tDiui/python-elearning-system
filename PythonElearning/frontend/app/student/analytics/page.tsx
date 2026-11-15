@@ -46,13 +46,30 @@ interface QuizQuestionDetail {
   explanation: string | null;
 }
 
-interface QuizAttemptDetail {
+interface PracticeSubmissionDetail {
+  question: string;
+  codeSubmitted: string | null;
+  isCorrect: boolean;
+  scoreEarned: number;
+  points: number;
+}
+
+type QuizAttemptDetail = {
+  type: 'Quiz';
   attemptId: number;
   title: string;
   totalScore: number;
   instructorFeedback: string;
   questions: QuizQuestionDetail[];
-}
+} | {
+  type: 'Practice';
+  attemptId: number;
+  title: string;
+  totalScore: number;
+  maxScore: number;
+  instructorFeedback: string;
+  submissions: PracticeSubmissionDetail[];
+};
 
 export default function StudentAnalyticsPage() {
   const router = useRouter();
@@ -236,7 +253,7 @@ export default function StudentAnalyticsPage() {
                   <time className="text-xs text-gray-500">
                     {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(result.startTime))}
                   </time>
-                  {result.type === 'Quiz' && result.gradingStatus !== 'Pending' && result.gradingStatus !== 'Draft' && (
+                  {result.gradingStatus !== 'Pending' && result.gradingStatus !== 'Draft' && (
                     <div className="md:col-span-5">
                       <button
                         type="button"
@@ -257,7 +274,42 @@ export default function StudentAnalyticsPage() {
                           ) : detailError ? (
                             <p role="alert" className="text-sm text-red-700">{detailError}</p>
                           ) : attemptDetail?.attemptId === result.attemptId ? (
-                            attemptDetail.questions.length === 0 ? (
+                            attemptDetail.type === 'Practice' ? (
+                              attemptDetail.submissions.length === 0 ? (
+                                <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                                  <h4 className="text-sm font-semibold text-amber-900">Lượt làm này không có mã nguồn đã lưu</h4>
+                                  <p className="mt-1 text-sm text-amber-800">
+                                    Hệ thống không có dữ liệu chi tiết mã nguồn cho lượt nộp này.
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  {attemptDetail.instructorFeedback && (
+                                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                                      <h4 className="font-bold">Nhận xét của giảng viên</h4>
+                                      <p className="mt-1 whitespace-pre-wrap">{attemptDetail.instructorFeedback}</p>
+                                    </div>
+                                  )}
+                                  {attemptDetail.submissions.map((submission, submissionIndex) => (
+                                    <section key={`${result.attemptId}-${submissionIndex}`} className="rounded-lg border border-gray-200 bg-white p-4">
+                                      <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <h4 className="text-sm font-semibold text-gray-900">
+                                          {submission.question || `Bài nộp ${submissionIndex + 1}`}
+                                        </h4>
+                                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${submission.isCorrect ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                          {submission.isCorrect ? 'Đạt' : 'Chưa đạt'} · {submission.scoreEarned}/{submission.points} điểm
+                                        </span>
+                                      </div>
+                                      <div className="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-4">
+                                        <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-emerald-300">
+                                          {submission.codeSubmitted || 'Không có mã nguồn đã lưu.'}
+                                        </pre>
+                                      </div>
+                                    </section>
+                                  ))}
+                                </div>
+                              )
+                            ) : attemptDetail.questions.length === 0 ? (
                               <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                                 <h4 className="text-sm font-semibold text-amber-900">Lượt làm này chưa lưu chi tiết từng câu</h4>
                                 <p className="mt-1 text-sm text-amber-800">
