@@ -26,6 +26,7 @@ interface Question {
 interface QuizConfig {
   questionCount: number;
   passScore: number;
+  maxAttempts: number;
   types: { multipleChoice: number; trueFalse: number; fillIn: number; essay: number; };
   tags: string[];
   questions: Question[]; // Mảng chứa chi tiết các câu hỏi
@@ -529,18 +530,22 @@ export default function QuizTab({ courseId, onAddQuiz }: QuizTabProps) {
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-4 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
+              <div className="grid grid-cols-4 gap-4 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
                 <div className="text-center">
                   <div className="text-lg font-bold text-gray-900">{quiz.config.questionCount}</div>
                   <div className="text-xs text-gray-500 font-medium">Câu hỏi</div>
                 </div>
-                <div className="text-center border-l border-r border-gray-200">
+                <div className="text-center border-l border-gray-200">
                   <div className="text-lg font-bold text-gray-900">{quiz.timeLimit}p</div>
                   <div className="text-xs text-gray-500 font-medium">Thời gian</div>
                 </div>
-                <div className="text-center">
+                <div className="text-center border-l border-gray-200">
                   <div className="text-lg font-bold text-gray-900">{quiz.config.passScore}%</div>
                   <div className="text-xs text-gray-500 font-medium">Pass score</div>
+                </div>
+                <div className="text-center border-l border-gray-200">
+                  <div className="text-lg font-bold text-gray-900">{quiz.config.maxAttempts === 0 ? '0 (∞)' : quiz.config.maxAttempts}</div>
+                  <div className="text-xs text-gray-500 font-medium">Lượt làm</div>
                 </div>
               </div>
 
@@ -626,7 +631,7 @@ export default function QuizTab({ courseId, onAddQuiz }: QuizTabProps) {
       {/* CÀI ĐẶT CHUNG */}
       <div className="border border-gray-200 rounded-2xl p-6 mb-8 bg-white shadow-sm">
         <h3 className="font-bold text-gray-900 mb-6 text-lg">Cài đặt Quiz</h3>
-        <div className="grid grid-cols-4 gap-6 mb-6">
+        <div className="grid grid-cols-2 gap-6 mb-6 lg:grid-cols-5">
           <div className="col-span-2">
             <label className="text-xs font-bold text-gray-500 block mb-2">Tên Quiz</label>
             <input type="text" value={activeQuiz.title} onChange={(e) => handleUpdateQuiz('title', e.target.value)} className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -638,6 +643,22 @@ export default function QuizTab({ courseId, onAddQuiz }: QuizTabProps) {
           <div>
             <label className="text-xs font-bold text-gray-500 block mb-2">Điểm qua môn (%)</label>
             <input type="number" value={activeQuiz.config.passScore} onChange={(e) => handleUpdateQuiz('config', { ...activeQuiz.config, passScore: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-500 block mb-2">Số lượt làm bài</label>
+            <input
+              type="number"
+              min={0}
+              value={activeQuiz.config.maxAttempts}
+              title="Để 0 nếu không muốn giới hạn số lượt làm bài"
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                const maxAttempts = Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+                handleUpdateQuiz('config', { ...activeQuiz.config, maxAttempts });
+              }}
+              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <p className="mt-1 text-[11px] text-gray-500">0 = không giới hạn</p>
           </div>
         </div>
 

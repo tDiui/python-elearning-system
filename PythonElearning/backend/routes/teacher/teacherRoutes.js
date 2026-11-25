@@ -7,6 +7,7 @@ const teacherAuth = [verifyToken, requireTeacher];
 const { 
   getTeacherDashboard, getTeacherStudentProgress, getTeacherLayoutData, getTeacherCourseManagement,
   createCourse, updateCourse, updateCourseStatus, deleteCourse,
+  getTeacherCategories, createTeacherCategory, updateTeacherCategory, deleteTeacherCategory,
   createChapter, createLesson, reorderChapters, reorderLessons,
   updateChapter, deleteChapter, updateLesson, updateLessonStatus, deleteLesson, createExercise, deleteExercise , getTeacherExercises, updateExerciseDetails, getTeacherQuizzes, createQuiz, getEnrollments, updateEnrollmentStatus
   , getEssayAttempts, gradeEssayAttempt, getNotificationCourses, getNotificationRecipients, sendCourseNotification
@@ -40,6 +41,11 @@ router.get('/dashboard', ...teacherAuth, getTeacherDashboard);
 router.get('/courses/:courseId/students/:studentId/progress', ...teacherAuth, getTeacherStudentProgress);
 router.get('/layout', ...teacherAuth, getTeacherLayoutData);
 router.get('/course-management', ...teacherAuth, getTeacherCourseManagement);
+
+router.get('/categories', ...teacherAuth, getTeacherCategories);
+router.post('/categories', ...teacherAuth, createTeacherCategory);
+router.put('/categories/:id', ...teacherAuth, updateTeacherCategory);
+router.delete('/categories/:id', ...teacherAuth, deleteTeacherCategory);
 
 router.post('/course', ...teacherAuth, createCourse);
 router.put('/course/:id', ...teacherAuth, updateCourse);

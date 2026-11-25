@@ -160,25 +160,6 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <div className="relative my-7">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-3 bg-white text-gray-400">hoặc</span>
-          </div>
-        </div>
-
-        <Button variant="outline" fullWidth className="gap-2 opacity-60" type="button" disabled title="Google OAuth chưa được cấu hình">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M22.56 12.25C22.56 11.47 22.49 10.72 22.36 10H12V14.26H17.92C17.67 15.63 16.89 16.8 15.72 17.58V20.34H19.28C21.36 18.42 22.56 15.6 22.56 12.25Z" fill="#4285F4"/>
-            <path d="M12 23C14.97 23 17.46 22.02 19.28 20.34L15.72 17.58C14.73 18.24 13.48 18.64 12 18.64C9.14 18.64 6.71 16.71 5.84 14.12H2.17V16.97C3.98 20.57 7.7 23 12 23Z" fill="#34A853"/>
-            <path d="M5.84 14.12C5.62 13.47 5.49 12.75 5.49 12C5.49 11.25 5.62 10.53 5.84 9.88V7.03H2.17C1.43 8.5 1 10.2 1 12C1 13.8 1.43 15.5 2.17 16.97L5.84 14.12Z" fill="#FBBC05"/>
-            <path d="M12 5.36C13.62 5.36 15.07 5.92 16.21 7.01L19.36 3.86C17.45 2.08 14.97 1 12 1C7.7 1 3.98 3.43 2.17 7.03L5.84 9.88C6.71 7.29 9.14 5.36 12 5.36Z" fill="#EA4335"/>
-          </svg>
-          Google OAuth chưa được cấu hình
-        </Button>
-
         <p className="text-center text-sm text-gray-600 mt-8">
           Chưa có tài khoản? <Link href="/register" className="text-indigo-600 font-medium hover:underline">Đăng ký ngay</Link>
         </p>

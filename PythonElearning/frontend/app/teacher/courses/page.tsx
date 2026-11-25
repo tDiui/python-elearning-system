@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import ExerciseTab from './components/ExerciseTab';
 import QuizTab from './components/QuizTab';
 
@@ -25,7 +26,7 @@ type Lesson = {
   exercises: Exercise[];
 };
 type Chapter = { id: number; title: string; progress: string; lessons: Lesson[]; };
-type CourseCategory = { id: number; name: string; };
+type CourseCategory = { id: number; name: string; description?: string; courseCount?: number; };
 type CourseData = {
   id: number;
   title: string;
@@ -85,19 +86,39 @@ export default function CourseManagementPage() {
   const [courseDescriptionInput, setCourseDescriptionInput] = useState('');
   const [courseCategoryInput, setCourseCategoryInput] = useState('');
   const [isSavingCourse, setIsSavingCourse] = useState(false);
+  const [courseOptions, setCourseOptions] = useState<Array<{ id: number; title: string }>>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [categories, setCategories] = useState<CourseCategory[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [categoryMode, setCategoryMode] = useState<'create' | 'edit'>('create');
+  const [categoryNameInput, setCategoryNameInput] = useState('');
+  const [categoryDescriptionInput, setCategoryDescriptionInput] = useState('');
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [newCourseDescription, setNewCourseDescription] = useState('');
+  const [newCourseCategoryId, setNewCourseCategoryId] = useState('');
 
 const fetchCourseData = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
       if (!token) return router.push('/login');
 
-      const response = await fetch('http://localhost:5000/api/teacher/course-management', {
+      const query = selectedCourseId ? `?courseId=${selectedCourseId}` : '';
+      const response = await fetch(`http://localhost:5000/api/teacher/course-management${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const result = await response.json();
 
+      if (Array.isArray(result.courses)) {
+        setCourseOptions(result.courses);
+        if (!selectedCourseId && result.courses.length > 0) {
+          setSelectedCourseId(String(result.courses[0].id));
+        }
+      }
+
       if (result.success && result.data) {
         setCourseData(result.data);
+        setSelectedCategoryId(result.data.categoryId);
         
         // SỬA LỖI Ở ĐÂY: Dùng callback prev để không bị phụ thuộc vòng lặp
         setExpandedChapters(prev => {
@@ -109,18 +130,42 @@ const fetchCourseData = useCallback(async () => {
         
       } else {
         setCourseData(null);
+        setSelectedCategoryId(null);
       }
     } catch (error) {
       console.error('Lỗi tải Course Management:', error);
     } finally {
       setLoading(false);
     }
-  }, [router]); // XÓA expandedChapters.length KHỎI ĐÂY
+  }, [router, selectedCourseId]); // XÓA expandedChapters.length KHỎI ĐÂY
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return router.push('/login');
+
+      const response = await fetch('http://localhost:5000/api/teacher/categories', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Không thể tải danh mục.');
+      }
+      setCategories(result.categories || []);
+    } catch (error) {
+      console.error('Lỗi tải danh mục:', error);
+    }
+  }, [router]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchCourseData();
   }, [fetchCourseData]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchCategories();
+  }, [fetchCategories]);
 
   const handleToggleLessonStatus = async () => {
     if (!activeLesson) return;
@@ -207,7 +252,12 @@ const handleSaveModal = async () => {
 
     if (modalType === 'course') {
       endpoint = '/api/teacher/course';
-      payload = { title: modalInput };
+      const categoryId = Number(newCourseCategoryId);
+      payload = {
+        title: modalInput.trim(),
+        description: newCourseDescription.trim(),
+        ...(Number.isSafeInteger(categoryId) && categoryId > 0 ? { categoryId } : {}),
+      };
     } else if (modalType === 'chapter') {
       endpoint = '/api/teacher/chapter';
       payload = { courseId: courseData?.id, title: modalInput };
@@ -242,14 +292,27 @@ const handleSaveModal = async () => {
     }
 
     try {
-      await fetch(`http://localhost:5000${endpoint}`, {
+      const response = await fetch(`http://localhost:5000${endpoint}`, {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload)
       });
+      if (modalType === 'course') {
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || 'Không thể tạo khóa học.');
+        }
+        if (result.data?.id) {
+          setSelectedCourseId(String(result.data.id));
+        }
+        setNewCourseDescription('');
+        setNewCourseCategoryId('');
+      }
       setIsModalOpen(false);
       setModalInput('');
-      fetchCourseData();
+      if (modalType !== 'course') {
+        fetchCourseData();
+      }
     } catch (error) {
       console.error('Lỗi lưu dữ liệu:', error);
     } finally {
@@ -456,6 +519,10 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
     }
     
     setModalDifficulty('Easy');
+    if (type === 'course') {
+      setNewCourseDescription('');
+      setNewCourseCategoryId(categories[0] ? String(categories[0].id) : '');
+    }
     setModalInput(initialValue);
     setIsModalOpen(true);
   };
@@ -560,6 +627,87 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
     }
   };
 
+  const openCategoryModal = (mode: 'create' | 'edit') => {
+    if (mode === 'edit') {
+      const category = categories.find(item => item.id === selectedCategoryId);
+      if (!category) return;
+      setCategoryNameInput(category.name);
+      setCategoryDescriptionInput(category.description || '');
+    } else {
+      setCategoryNameInput('');
+      setCategoryDescriptionInput('');
+    }
+    setCategoryMode(mode);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleSaveCategory = async () => {
+    const name = categoryNameInput.trim();
+    if (!name) {
+      window.alert('Vui lòng nhập tên danh mục.');
+      return;
+    }
+
+    setIsSavingCategory(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        router.push('/login');
+        return;
+      }
+      const isEdit = categoryMode === 'edit';
+      const endpoint = isEdit ? `/api/teacher/categories/${selectedCategoryId}` : '/api/teacher/categories';
+      const response = await fetch(`http://localhost:5000${endpoint}`, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name, description: categoryDescriptionInput.trim() }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Không thể lưu danh mục.');
+      }
+      if (!isEdit && payload.data?.id) {
+        setSelectedCategoryId(payload.data.id);
+      }
+      setIsCategoryModalOpen(false);
+      await fetchCategories();
+      await fetchCourseData();
+    } catch (error) {
+      console.error('Lỗi lưu danh mục:', error);
+      window.alert(error instanceof Error ? error.message : 'Không thể lưu danh mục.');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!selectedCategoryId) return;
+    const category = categories.find(item => item.id === selectedCategoryId);
+    if (!window.confirm(`Xóa danh mục "${category?.name || ''}"? Thao tác này không thể hoàn tác.`)) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        router.push('/login');
+        return;
+      }
+      const response = await fetch(`http://localhost:5000/api/teacher/categories/${selectedCategoryId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Không thể xóa danh mục.');
+      }
+      setSelectedCategoryId(null);
+      await fetchCategories();
+      await fetchCourseData();
+    } catch (error) {
+      console.error('Lỗi xóa danh mục:', error);
+      window.alert(error instanceof Error ? error.message : 'Không thể xóa danh mục.');
+    }
+  };
+
   const handleToggleCourseVisibility = async () => {
     if (!courseData) return;
     const nextStatus = courseData.status === 'Published' ? 'Draft' : 'Published';
@@ -608,6 +756,8 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
       }
       setCourseData(null);
       setActiveLessonId(null);
+      setSelectedCourseId('');
+      setCourseOptions(prev => prev.filter(item => item.id !== courseData.id));
     } catch (error) {
       console.error('Lỗi xóa khóa học:', error);
       window.alert(error instanceof Error ? error.message : 'Không thể xóa khóa học.');
@@ -644,6 +794,21 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
         <div className="p-5 border-b border-gray-100">
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Khóa học</p>
           <h2 className="font-bold text-gray-900 leading-tight truncate" title={safeCourseData.title}>{safeCourseData.title}</h2>
+          {courseOptions.length > 0 && (
+            <select
+              value={selectedCourseId}
+              onChange={(event) => {
+                setSelectedCourseId(event.target.value);
+                setActiveLessonId(null);
+              }}
+              className="mt-2 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-500"
+              aria-label="Chọn khóa học"
+            >
+              {courseOptions.map((course) => (
+                <option key={course.id} value={course.id}>{course.title}</option>
+              ))}
+            </select>
+          )}
           {courseData && (
             <>
               <p className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -652,22 +817,49 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
                 {courseData.status === 'Published' ? 'Đang hiển thị' : 'Đang ẩn'}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" onClick={openCourseEditor} className="rounded-md bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-                  Sửa thông tin
-                </button>
                 <button
                   type="button"
                   onClick={() => void handleToggleCourseVisibility()}
-                  className="rounded-md bg-gray-100 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+                  className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ring-1 ${
+                    courseData.status === 'Published'
+                      ? 'bg-amber-50 text-amber-700 ring-amber-100 hover:bg-amber-100'
+                      : 'bg-emerald-50 text-emerald-700 ring-emerald-100 hover:bg-emerald-100'
+                  }`}
                 >
                   {courseData.status === 'Published' ? 'Ẩn khóa học' : 'Hiện khóa học'}
-                </button>
-                <button type="button" onClick={() => void handleDeleteCourse()} className="rounded-md bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100">
-                  Xóa
                 </button>
               </div>
             </>
           )}
+          <div className="mt-3 flex items-end justify-end gap-3">
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Danh mục</span>
+              <div className="flex gap-1.5">
+                <button type="button" onClick={() => openCategoryModal('edit')} disabled={!selectedCategoryId} title="Sửa danh mục" aria-label="Sửa danh mục" className="flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-blue-50 text-blue-700 ring-1 ring-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Pencil size={16} />
+                  <span className="text-[9px] font-bold">Sửa</span>
+                </button>
+                <button type="button" onClick={() => void handleDeleteCategory()} disabled={!selectedCategoryId} title="Xóa danh mục" aria-label="Xóa danh mục" className="flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Trash2 size={16} />
+                  <span className="text-[9px] font-bold">Xóa</span>
+                </button>
+              </div>
+            </div>
+            <span className="mb-1 h-10 w-px bg-gray-200" aria-hidden="true" />
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Khóa học</span>
+              <div className="flex gap-1.5">
+                <button type="button" onClick={openCourseEditor} disabled={!courseData} title="Sửa khóa học" aria-label="Sửa khóa học" className="flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-blue-50 text-blue-700 ring-1 ring-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Pencil size={16} />
+                  <span className="text-[9px] font-bold">Sửa</span>
+                </button>
+                <button type="button" onClick={() => void handleDeleteCourse()} disabled={!courseData} title="Xóa khóa học" aria-label="Xóa khóa học" className="flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Trash2 size={16} />
+                  <span className="text-[9px] font-bold">Xóa</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -845,10 +1037,10 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
         </div>
         
         
-        {activeTab === 'lessons' && (
+        {activeTab === 'lessons' && courseData && (
            <div className="p-4 border-t border-gray-100 bg-gray-50">
-             <button onClick={() => courseData ? openModal('chapter') : openModal('course')} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors">
-               {courseData ? '+ Thêm Chapter' : '+ Tạo khóa học mới'}
+             <button onClick={() => openModal('chapter')} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors">
+               + Thêm Chapter
              </button>
            </div>
         )}
@@ -856,13 +1048,22 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
 
       {/* KHU VỰC NỘI DUNG CHÍNH (BÊN PHẢI) */}
       <div className="flex-1 bg-white overflow-y-auto p-8 relative">
-        
+        <div className="mb-6 flex justify-end gap-3">
+          <button type="button" onClick={() => openCategoryModal('create')} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">
+            <Plus size={16} />
+            Thêm danh mục
+          </button>
+          <button type="button" onClick={() => openModal('course')} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
+            <Plus size={16} />
+            Tạo khóa học
+          </button>
+        </div>
+
         {!courseData ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center text-4xl mb-4 shadow-inner">📂</div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">Chưa có khóa học nào</h2>
-            <p className="text-gray-500 text-sm mb-6">Vui lòng tạo khóa học đầu tiên của bạn để bắt đầu thêm bài giảng.</p>
-            <button onClick={() => openModal('course')} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">Tạo khóa học ngay</button>
+            <p className="text-gray-500 text-sm">Chọn <span className="font-semibold text-blue-600">Tạo khóa học</span> ở góc trên bên phải để bắt đầu.</p>
           </div>
         ) : activeTab === 'lessons' && !activeLesson ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">Chọn một bài học bên trái hoặc tạo bài học mới.</div>
@@ -1328,6 +1529,64 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
           </section>
         </div>
       )}
+      {isCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="category-modal-title"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <h2 id="category-modal-title" className="text-xl font-bold text-gray-900">
+                {categoryMode === 'edit' ? 'Sửa danh mục' : 'Thêm danh mục'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsCategoryModalOpen(false)}
+                disabled={isSavingCategory}
+                aria-label="Đóng"
+                className="text-xl text-gray-400 hover:text-gray-700 disabled:opacity-50"
+              >×</button>
+            </div>
+            <div className="space-y-4">
+              <label className="block text-sm font-medium text-gray-700">
+                Tên danh mục
+                <input
+                  type="text"
+                  maxLength={100}
+                  value={categoryNameInput}
+                  onChange={(event) => setCategoryNameInput(event.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Mô tả
+                <textarea
+                  rows={4}
+                  value={categoryDescriptionInput}
+                  onChange={(event) => setCategoryDescriptionInput(event.target.value)}
+                  className="mt-1.5 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsCategoryModalOpen(false)}
+                disabled={isSavingCategory}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+              >Hủy</button>
+              <button
+                type="button"
+                onClick={() => void handleSaveCategory()}
+                disabled={isSavingCategory}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >{isSavingCategory ? 'Đang lưu...' : 'Lưu dữ liệu'}</button>
+            </div>
+          </section>
+        </div>
+      )}
       {isModalOpen && (
         <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-50 rounded-lg">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
@@ -1361,6 +1620,32 @@ const openModal = (type: ModalType, chapterId?: number | null, lessonId?: number
                   autoFocus
                 />
               </div>
+
+              {modalType === 'course' && (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 block mb-1">Mô tả</label>
+                    <textarea
+                      rows={4}
+                      value={newCourseDescription}
+                      onChange={(e) => setNewCourseDescription(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm font-medium text-gray-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 block mb-1">Danh mục</label>
+                    <select
+                      value={newCourseCategoryId}
+                      onChange={(e) => setNewCourseCategoryId(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm font-medium text-gray-800"
+                    >
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>{category.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
 
               {/* Hiện Dropdown Chủ đề khi tạo Bài tập hoặc Quiz */}
               {(modalType === 'exercise' || modalType === 'quiz') && (

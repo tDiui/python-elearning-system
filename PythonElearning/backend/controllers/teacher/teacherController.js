@@ -34,6 +34,28 @@ const calculateScorePercentage = (score, maxScore) => {
   return Math.min(100, Math.max(0, scoreValue / scoreScale * 100));
 };
 
+const normalizeCategoryName = (value = '') => String(value)
+  .trim()
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '');
+
+const parseCategoryId = (value) => {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+};
+
+const handleCategoryError = (res, error, defaultMessage) => {
+  if (error.code === 'P2002') {
+    return res.status(409).json({ success: false, message: 'Tên danh mục đã tồn tại.' });
+  }
+  if (error.code === 'P2003') {
+    return res.status(409).json({ success: false, message: 'Danh mục đang được khóa học sử dụng.' });
+  }
+  console.error(defaultMessage, error);
+  return res.status(500).json({ success: false, message: defaultMessage });
+};
+
 // 1. HÀM LẤY DỮ LIỆU DASHBOARD
 const getTeacherDashboard = async (req, res) => {
   try {
@@ -407,9 +429,31 @@ const getTeacherLayoutData = async (req, res) => {
 const getTeacherCourseManagement = async (req, res) => {
   try {
     const teacherId = req.user.userId;
+    const requestedCourseId = req.query.courseId === undefined ? null : Number(req.query.courseId);
+    if (
+      req.query.courseId !== undefined &&
+      (!Number.isSafeInteger(requestedCourseId) || requestedCourseId <= 0)
+    ) {
+      return res.status(400).json({ success: false, message: 'ID khóa học không hợp lệ.' });
+    }
+
+    const availableCourses = await prisma.courses.findMany({
+      where: { InstructorID: teacherId },
+      orderBy: { Title: 'asc' },
+      select: { CourseID: true, Title: true }
+    });
+    const selectedCourse = requestedCourseId
+      ? availableCourses.find((item) => item.CourseID === requestedCourseId)
+      : availableCourses[0];
+    if (requestedCourseId && !selectedCourse) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học thuộc quyền quản lý của bạn.' });
+    }
+    const courseOptions = availableCourses.map((item) => ({ id: item.CourseID, title: item.Title }));
+    if (!selectedCourse) return res.status(200).json({ success: true, data: null, courses: courseOptions });
+
     const [course, categories] = await Promise.all([
       prisma.courses.findFirst({
-        where: { InstructorID: teacherId },
+        where: { CourseID: selectedCourse.CourseID, InstructorID: teacherId },
         include: {
           Categories: { select: { CategoryID: true, CategoryName: true } },
           Chapters: {
@@ -429,7 +473,16 @@ const getTeacherCourseManagement = async (req, res) => {
       })
     ]);
 
-    if (!course) return res.status(200).json({ success: true, data: null });
+    if (!course) return res.status(200).json({ success: true, data: null, courses: courseOptions });
+
+    const [exerciseCount, quizCount] = await Promise.all([
+      prisma.exercises.count({
+        where: { Type: 'Practice', Lessons: { Chapters: { CourseID: course.CourseID } } }
+      }),
+      prisma.exercises.count({
+        where: { Type: 'Quiz', Lessons: { Chapters: { CourseID: course.CourseID } } }
+      })
+    ]);
 
     const lessonIds = course.Chapters.flatMap(chapter =>
       chapter.Lessons.filter((lesson) => lesson.Status === 'Published').map((lesson) => lesson.LessonID)
@@ -475,7 +528,8 @@ const getTeacherCourseManagement = async (req, res) => {
       })),
       stats: {
         lessons: course.Chapters.reduce((acc, ch) => acc + ch.Lessons.length, 0),
-        exercises: 8, quizzes: 4
+        exercises: exerciseCount,
+        quizzes: quizCount
       },
       chapters: course.Chapters.map(ch => ({
         id: ch.ChapterID, title: ch.Title, progress: `${ch.Lessons.length} bài`,
@@ -501,7 +555,7 @@ const getTeacherCourseManagement = async (req, res) => {
         })
       }))
     };
-    res.status(200).json({ success: true, data: formattedData });
+    res.status(200).json({ success: true, data: formattedData, courses: courseOptions });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Lỗi server' });
   }
@@ -510,30 +564,172 @@ const getTeacherCourseManagement = async (req, res) => {
 // POST: TẠO KHÓA HỌC MỚI
 const createCourse = async (req, res) => {
   try {
-    const { title } = req.body;
-    const teacherId = req.user.userId;
+    const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+    if (!title || title.length > 200) {
+      return res.status(400).json({ success: false, message: 'Tên khóa học phải từ 1 đến 200 ký tự.' });
+    }
 
-    // BẢN VÁ 1: Bảng Courses bắt buộc phải có CategoryID (NOT NULL).
-    // Ở đây ta tìm danh mục đầu tiên trong Database. Nếu DB trống, tự động tạo 1 danh mục mặc định.
-    let category = await prisma.categories.findFirst();
-    if (!category) {
-      category = await prisma.categories.create({
-        data: { CategoryName: 'Lập trình cơ bản', Description: 'Danh mục mặc định' }
+    let category = null;
+    if (req.body.categoryId !== undefined) {
+      const categoryId = parseCategoryId(req.body.categoryId);
+      if (!categoryId) {
+        return res.status(400).json({ success: false, message: 'Danh mục khóa học không hợp lệ.' });
+      }
+      category = await prisma.categories.findUnique({
+        where: { CategoryID: categoryId },
+        select: { CategoryID: true }
       });
+      if (!category) {
+        return res.status(400).json({ success: false, message: 'Danh mục khóa học không tồn tại.' });
+      }
+    } else {
+      category = await prisma.categories.findFirst();
+      if (!category) {
+        category = await prisma.categories.create({
+          data: { CategoryName: 'Lập trình cơ bản', Description: 'Danh mục mặc định' }
+        });
+      }
     }
 
     const newCourse = await prisma.courses.create({
       data: {
         Title: title,
-        InstructorID: teacherId,
-        CategoryID: category.CategoryID, // Đã bổ sung trường bắt buộc
-        Status: 'Draft' // Sử dụng đúng cột Status trong SQL của bạn
-      }
+        Description: description || null,
+        InstructorID: req.user.userId,
+        CategoryID: category.CategoryID,
+        Status: 'Draft'
+      },
+      select: { CourseID: true, Title: true }
     });
-    res.status(201).json({ success: true, data: newCourse });
+    return res.status(201).json({
+      success: true,
+      message: 'Đã tạo khóa học.',
+      data: { id: newCourse.CourseID, CourseID: newCourse.CourseID, title: newCourse.Title }
+    });
   } catch (error) {
     console.error('Lỗi tạo khóa học:', error);
-    res.status(500).json({ success: false, message: 'Lỗi server' });
+    return res.status(500).json({ success: false, message: 'Không thể tạo khóa học.' });
+  }
+};
+
+const getTeacherCategories = async (req, res) => {
+  try {
+    const categories = await prisma.categories.findMany({
+      orderBy: { CategoryName: 'asc' },
+      select: {
+        CategoryID: true,
+        CategoryName: true,
+        Description: true,
+        _count: { select: { Courses: true } }
+      }
+    });
+    return res.status(200).json({
+      success: true,
+      categories: categories.map((category) => ({
+        id: category.CategoryID,
+        name: category.CategoryName,
+        description: category.Description || '',
+        courseCount: category._count.Courses
+      }))
+    });
+  } catch (error) {
+    return handleCategoryError(res, error, 'Không thể tải danh mục.');
+  }
+};
+
+const createTeacherCategory = async (req, res) => {
+  try {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+    if (!name || name.length > 100) {
+      return res.status(400).json({ success: false, message: 'Tên danh mục là bắt buộc và tối đa 100 ký tự.' });
+    }
+
+    const categories = await prisma.categories.findMany({
+      select: { CategoryID: true, CategoryName: true }
+    });
+    if (categories.some((category) => normalizeCategoryName(category.CategoryName) === normalizeCategoryName(name))) {
+      return res.status(409).json({ success: false, message: 'Tên danh mục đã tồn tại.' });
+    }
+
+    const category = await prisma.categories.create({
+      data: { CategoryName: name, Description: description || null }
+    });
+    return res.status(201).json({
+      success: true,
+      message: 'Đã thêm danh mục.',
+      data: { id: category.CategoryID, name: category.CategoryName, description: category.Description || '', courseCount: 0 }
+    });
+  } catch (error) {
+    return handleCategoryError(res, error, 'Không thể thêm danh mục.');
+  }
+};
+
+const updateTeacherCategory = async (req, res) => {
+  try {
+    const categoryId = parseCategoryId(req.params.id);
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+    if (!categoryId) {
+      return res.status(400).json({ success: false, message: 'Mã danh mục không hợp lệ.' });
+    }
+    if (!name || name.length > 100) {
+      return res.status(400).json({ success: false, message: 'Tên danh mục là bắt buộc và tối đa 100 ký tự.' });
+    }
+
+    const currentCategory = await prisma.categories.findUnique({ where: { CategoryID: categoryId } });
+    if (!currentCategory) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy danh mục.' });
+    }
+
+    const duplicates = await prisma.categories.findMany({
+      where: { CategoryID: { not: categoryId } },
+      select: { CategoryName: true }
+    });
+    if (duplicates.some((category) => normalizeCategoryName(category.CategoryName) === normalizeCategoryName(name))) {
+      return res.status(409).json({ success: false, message: 'Tên danh mục đã tồn tại.' });
+    }
+
+    const category = await prisma.categories.update({
+      where: { CategoryID: categoryId },
+      data: { CategoryName: name, Description: description || null }
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Đã cập nhật danh mục.',
+      data: { id: category.CategoryID, name: category.CategoryName, description: category.Description || '' }
+    });
+  } catch (error) {
+    return handleCategoryError(res, error, 'Không thể cập nhật danh mục.');
+  }
+};
+
+const deleteTeacherCategory = async (req, res) => {
+  try {
+    const categoryId = parseCategoryId(req.params.id);
+    if (!categoryId) {
+      return res.status(400).json({ success: false, message: 'Mã danh mục không hợp lệ.' });
+    }
+
+    const category = await prisma.categories.findUnique({
+      where: { CategoryID: categoryId },
+      include: { _count: { select: { Courses: true } } }
+    });
+    if (!category) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy danh mục.' });
+    }
+    if (category._count.Courses > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'Danh mục đang chứa khóa học. Hãy chuyển các khóa học sang danh mục khác trước khi xóa.'
+      });
+    }
+
+    await prisma.categories.delete({ where: { CategoryID: categoryId } });
+    return res.status(200).json({ success: true, message: 'Đã xóa danh mục.' });
+  } catch (error) {
+    return handleCategoryError(res, error, 'Không thể xóa danh mục.');
   }
 };
 
@@ -1345,10 +1541,18 @@ const deleteExercise = async (req, res) => {
 const getTeacherExercises = async (req, res) => {
   try {
     const teacherId = req.user.userId;
+    const requestedCourseId = req.query.courseId === undefined ? null : Number(req.query.courseId);
+    if (
+      req.query.courseId !== undefined &&
+      (!Number.isSafeInteger(requestedCourseId) || requestedCourseId <= 0)
+    ) {
+      return res.status(400).json({ success: false, message: 'ID khóa học không hợp lệ.' });
+    }
+    const courseFilter = requestedCourseId ? { CourseID: requestedCourseId } : {};
     const exercises = await prisma.exercises.findMany({
       where: {
         Type: 'Practice',
-        Lessons: { Chapters: { Courses: { InstructorID: teacherId } } }
+        Lessons: { Chapters: { Courses: { InstructorID: teacherId }, ...courseFilter } }
       },
       include: { Lessons: { include: { Chapters: true } } }
     });
@@ -1617,10 +1821,18 @@ const updateExerciseDetails = async (req, res) => {
 const getTeacherQuizzes = async (req, res) => {
   try {
     const teacherId = req.user.userId;
+    const requestedCourseId = req.query.courseId === undefined ? null : Number(req.query.courseId);
+    if (
+      req.query.courseId !== undefined &&
+      (!Number.isSafeInteger(requestedCourseId) || requestedCourseId <= 0)
+    ) {
+      return res.status(400).json({ success: false, message: 'ID khóa học không hợp lệ.' });
+    }
+    const courseFilter = requestedCourseId ? { CourseID: requestedCourseId } : {};
     const quizzes = await prisma.exercises.findMany({
       where: {
         Type: 'Quiz',
-        Lessons: { Chapters: { Courses: { InstructorID: teacherId } } }
+        Lessons: { Chapters: { Courses: { InstructorID: teacherId }, ...courseFilter } }
       },
       include: { Lessons: { include: { Chapters: true } } }
     });
@@ -1641,10 +1853,12 @@ const getTeacherQuizzes = async (req, res) => {
 
     const formattedQuizzes = quizzes.map(q => {
       const config = q.QuizConfig ? JSON.parse(q.QuizConfig) : {
-        questionCount: 0, passScore: 70, 
+        questionCount: 0, passScore: 70, maxAttempts: 0,
         types: { multipleChoice: 0, trueFalse: 0, fillIn: 0, essay: 0 },
         tags: []
       };
+      const maxAttempts = Number(config.maxAttempts);
+      config.maxAttempts = Number.isInteger(maxAttempts) && maxAttempts >= 0 ? maxAttempts : 0;
       config.types = {
         multipleChoice: 0,
         trueFalse: 0,
@@ -1849,6 +2063,8 @@ const createQuiz = async (req, res) => {
   try {
     const lessonId = Number(req.body?.lessonId);
     const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    const requestedMaxAttempts = Number(req.body?.maxAttempts ?? 0);
+    const maxAttempts = Number.isSafeInteger(requestedMaxAttempts) && requestedMaxAttempts >= 0 ? requestedMaxAttempts : 0;
     if (!Number.isSafeInteger(lessonId) || lessonId <= 0 || !title) {
       return res.status(400).json({ success: false, message: 'Bài học và tên bài kiểm tra là bắt buộc.' });
     }
@@ -1873,7 +2089,7 @@ const createQuiz = async (req, res) => {
         MaxScore: 10,
         Status: 'Draft',
         QuizConfig: JSON.stringify({
-          questionCount: 0, passScore: 70, 
+          questionCount: 0, passScore: 70, maxAttempts,
           types: { multipleChoice: 0, trueFalse: 0, fillIn: 0, essay: 0 },
           tags: []
         })
@@ -2413,6 +2629,10 @@ module.exports = {
   updateCourse,
   updateCourseStatus,
   deleteCourse,
+  getTeacherCategories,
+  createTeacherCategory,
+  updateTeacherCategory,
+  deleteTeacherCategory,
   createChapter,
   createLesson,
   updateLessonStatus,

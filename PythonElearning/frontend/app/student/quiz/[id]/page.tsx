@@ -18,6 +18,14 @@ interface QuizQuestion {
   options: QuizOption[];
 }
 
+interface QuizAttemptSummary {
+  attemptId: number;
+  scoreEarned: number;
+  percentage: number;
+  gradingStatus: string;
+  submittedAt: string;
+}
+
 interface QuizDetail {
   id: number;
   title: string;
@@ -26,6 +34,10 @@ interface QuizDetail {
   timeLimit: number;
   maxScore: number;
   passScore: number | null;
+  maxAttempts: number;
+  attemptCount: number;
+  remainingAttempts: number | null;
+  lastAttempt: QuizAttemptSummary | null;
   questions: QuizQuestion[];
 }
 
@@ -69,7 +81,7 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
         }
 
         setQuiz(payload.data);
-        if (payload.data.timeLimit > 0) {
+        if (payload.data.remainingAttempts !== 0 && payload.data.timeLimit > 0) {
           setSecondsLeft(payload.data.timeLimit * 60);
         }
       } catch (fetchError) {
@@ -151,6 +163,9 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
 
   if (!quiz) return null;
 
+  const attemptsExhausted = quiz.maxAttempts > 0 && quiz.remainingAttempts === 0;
+  const lastAwaitingGrade = quiz.lastAttempt && ['Pending', 'Draft'].includes(quiz.lastAttempt.gradingStatus);
+
   return (
     <div className="mx-auto max-w-3xl pb-12">
       <Link href="/student/quiz" className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-blue-600">
@@ -176,6 +191,22 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
           )}
         </div>
       </header>
+
+      {attemptsExhausted && !result && (
+        <div role="status" className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+          <p className="font-bold">Bạn đã hết {quiz.maxAttempts} lượt làm bài kiểm tra này.</p>
+          {quiz.lastAttempt && (
+            <p className="mt-1">
+              {lastAwaitingGrade
+                ? 'Lần làm gần nhất đang chờ giảng viên công bố kết quả.'
+                : `Kết quả gần nhất: ${quiz.lastAttempt.percentage}% (${quiz.lastAttempt.scoreEarned}/${quiz.maxScore} điểm).`}
+            </p>
+          )}
+          <Link href="/student/analytics" className="mt-3 inline-flex font-bold text-blue-700 hover:underline">
+            Xem kết quả trong thống kê học tập
+          </Link>
+        </div>
+      )}
 
       {result ? (
         <section aria-live="polite" className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
@@ -205,7 +236,7 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
       ) : (
         <div className="space-y-4">
           {quiz.questions.map((question, index) => (
-            <fieldset key={question.id} disabled={secondsLeft === 0 || isSubmitting} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+            <fieldset key={question.id} disabled={attemptsExhausted || secondsLeft === 0 || isSubmitting} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
               <legend className="sr-only">Câu hỏi {index + 1}</legend>
               <div className="mb-4 flex items-start gap-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-sm font-bold text-blue-700">{index + 1}</span>
@@ -274,15 +305,15 @@ export default function StudentQuizAttemptPage({ params }: { params: Promise<{ i
           ))}
 
           {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
-          {secondsLeft === 0 && <p role="status" className="text-sm font-medium text-red-600">Đã hết thời gian. Hãy nộp bài để ghi nhận kết quả.</p>}
+          {secondsLeft === 0 && !attemptsExhausted && <p role="status" className="text-sm font-medium text-red-600">Đã hết thời gian. Hãy nộp bài để ghi nhận kết quả.</p>}
           <div className="flex justify-end">
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={attemptsExhausted || isSubmitting}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Send className="h-4 w-4" />
-              {isSubmitting ? 'Đang nộp bài...' : 'Nộp bài'}
+              {attemptsExhausted ? 'Đã hết lượt làm bài' : isSubmitting ? 'Đang nộp bài...' : 'Nộp bài'}
             </button>
           </div>
         </div>
