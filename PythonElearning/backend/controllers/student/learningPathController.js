@@ -290,8 +290,7 @@ ${JSON.stringify(validExercises)}
       provider: selectedProvider,
       ...(savedAISettings
         ? { modelName: savedAISettings.model, apiKey: savedAISettings.apiKey }
-        : {}),
-      timeoutMs: 15000
+        : {})
     });
     let validItemsToInsert = [];
     let pathTitle = 'Lộ trình học tập cá nhân hóa';

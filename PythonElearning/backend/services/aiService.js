@@ -19,9 +19,6 @@ const extractSafeJSON = (rawText) => {
 // Hàm gọi AI đa nền tảng (Universal LLM Caller)
 const callLLMProvider = async (promptText, options = {}) => {
   const provider = options.provider || process.env.AI_PROVIDER || 'gemini'; // 'gemini' | 'openai'
-  const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0
-    ? options.timeoutMs
-    : 15000;
   const startTime = Date.now();
 
   try {
@@ -40,10 +37,7 @@ const callLLMProvider = async (promptText, options = {}) => {
         config: {
           temperature: 0.2, // Hạ nhiệt độ thấp để AI bớt "sáng tạo" lung tung, bám sát ID thật
           responseMimeType: 'application/json', // Ép trả về chuẩn MIME JSON
-          httpOptions: {
-            timeout: timeoutMs,
-            retryOptions: { attempts: 1 }
-          }
+          httpOptions: { retryOptions: { attempts: 1 } }
         }
       });
 
@@ -67,7 +61,11 @@ const callLLMProvider = async (promptText, options = {}) => {
     // (Dùng fetch thuần của Node.js 18+, không cần cài thêm thư viện)
     // ==========================================
     if (provider === 'openai') {
-      const apiUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1/chat/completions';
+      const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1/chat/completions')
+        .replace(/\/+$/, '');
+      const apiUrl = baseUrl.endsWith('/chat/completions')
+        ? baseUrl
+        : `${baseUrl}/chat/completions`;
       const modelName = options.modelName || process.env.OPENAI_MODEL || 'gpt-4o-mini';
       const apiKey = options.apiKey || process.env.OPENAI_API_KEY;
       if (!apiKey) throw new Error('Chưa cấu hình API Key cho OpenAI.');
@@ -86,8 +84,7 @@ const callLLMProvider = async (promptText, options = {}) => {
           ],
           temperature: 0.2,
           response_format: { type: 'json_object' } // Ép chuẩn JSON của OpenAI
-        }),
-        signal: AbortSignal.timeout(timeoutMs)
+        })
       });
 
       const result = await response.json();
@@ -119,9 +116,7 @@ const callLLMProvider = async (promptText, options = {}) => {
       modelName: options.modelName || 'unknown',
       rawResponse: null,
       parsedData: null,
-      errorMessage: error.name === 'TimeoutError' || error.name === 'AbortError'
-        ? `AI request timed out after ${timeoutMs}ms`
-        : error.message,
+      errorMessage: error.message,
       processingTimeMs: Date.now() - startTime
     };
   }

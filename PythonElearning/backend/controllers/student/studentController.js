@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
 const fs = require('fs');
 const prisma = new PrismaClient();
 const { updateTopicProgress } = require('../../services/learningProgressService');
@@ -1352,16 +1352,22 @@ const getStudentQuizzes = async (req, res) => {
       orderBy: { ExerciseID: 'asc' }
     });
 
-    const attemptCounts = quizzes.length
-      ? await prisma.testAttempts.groupBy({
-          by: ['ExerciseID'],
-          where: { ExerciseID: { in: quizzes.map((quiz) => quiz.ExerciseID) } },
-          _count: { _all: true }
+    const attempts = quizzes.length
+      ? await prisma.testAttempts.findMany({
+          where: {
+            UserID: studentId,
+            ExerciseID: { in: quizzes.map((quiz) => quiz.ExerciseID) }
+          },
+          select: { ExerciseID: true }
         })
       : [];
-    const attemptsByQuiz = new Map(
-      attemptCounts.map((item) => [item.ExerciseID, item._count._all])
-    );
+    const attemptsByQuiz = new Map();
+    for (const attempt of attempts) {
+      attemptsByQuiz.set(
+        attempt.ExerciseID,
+        (attemptsByQuiz.get(attempt.ExerciseID) || 0) + 1
+      );
+    }
 
     const data = quizzes.map((quiz) => {
       const config = quiz.QuizConfig ? JSON.parse(quiz.QuizConfig) : {};
@@ -1380,7 +1386,11 @@ const getStudentQuizzes = async (req, res) => {
         timeLimit: quiz.TimeLimitMinutes,
         passScore: typeof config.passScore === 'number' && Number.isFinite(config.passScore) ? config.passScore : null,
         maxScore: 10,
-        attemptCount: attemptsByQuiz.get(quiz.ExerciseID) || 0
+        attemptCount: attemptsByQuiz.get(quiz.ExerciseID) || 0,
+        maxAttempts: (() => {
+          const maxAttempts = Number(config.maxAttempts);
+          return Number.isInteger(maxAttempts) && maxAttempts >= 0 ? maxAttempts : 0;
+        })()
       };
     });
 
@@ -1451,6 +1461,23 @@ const getStudentQuiz = async (req, res) => {
 
     const config = quiz.QuizConfig ? JSON.parse(quiz.QuizConfig) : {};
     const questions = Array.isArray(config.questions) ? config.questions : [];
+    const maxAttemptsValue = Number(config.maxAttempts);
+    const maxAttempts = Number.isInteger(maxAttemptsValue) && maxAttemptsValue >= 0
+      ? maxAttemptsValue
+      : 0;
+    const [attemptCount, lastAttempt] = await Promise.all([
+      prisma.testAttempts.count({
+        where: { ExerciseID: quizId, UserID: studentId }
+      }),
+      prisma.testAttempts.findFirst({
+        where: { ExerciseID: quizId, UserID: studentId },
+        orderBy: { StartTime: 'desc' },
+        select: { AttemptID: true, TotalScore: true, GradingStatus: true, EndTime: true }
+      })
+    ]);
+    const remainingAttempts = maxAttempts > 0 ? Math.max(0, maxAttempts - attemptCount) : null;
+    const lastScore = Number(lastAttempt?.TotalScore) || 0;
+    const gradingStatus = lastAttempt?.GradingStatus || 'Published';
 
     res.status(200).json({
       success: true,
@@ -1462,6 +1489,16 @@ const getStudentQuiz = async (req, res) => {
         timeLimit: quiz.TimeLimitMinutes,
         maxScore: 10,
         passScore: typeof config.passScore === 'number' && Number.isFinite(config.passScore) ? config.passScore : null,
+        maxAttempts,
+        attemptCount,
+        remainingAttempts,
+        lastAttempt: lastAttempt ? {
+          attemptId: lastAttempt.AttemptID,
+          scoreEarned: lastScore,
+          percentage: Math.min(Number(((lastScore / 10) * 100).toFixed(2)), 100),
+          gradingStatus,
+          submittedAt: lastAttempt.EndTime
+        } : null,
         questions: questions.map((question) => ({
           id: String(question.id),
           type: question.type,
@@ -1542,6 +1579,22 @@ const submitStudentQuiz = async (req, res) => {
 
     if (!questions.length) {
       return res.status(409).json({ success: false, message: 'Bài kiểm tra chưa có câu hỏi' });
+    }
+
+    const maxAttemptsValue = Number(config.maxAttempts);
+    const maxAttempts = Number.isInteger(maxAttemptsValue) && maxAttemptsValue >= 0
+      ? maxAttemptsValue
+      : 0;
+    if (maxAttempts > 0) {
+      const attemptCount = await prisma.testAttempts.count({
+        where: { ExerciseID: quiz.ExerciseID, UserID: studentId }
+      });
+      if (attemptCount >= maxAttempts) {
+        return res.status(403).json({
+          success: false,
+          message: `Bạn đã hết ${maxAttempts} lượt làm bài kiểm tra này`
+        });
+      }
     }
 
     const answersByQuestion = new Map(
@@ -1643,7 +1696,16 @@ const submitStudentQuiz = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Không xác định được khóa học của bài kiểm tra' });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const createQuizAttempt = () => prisma.$transaction(async (tx) => {
+      const attemptCount = await tx.testAttempts.count({
+        where: { ExerciseID: quiz.ExerciseID, UserID: studentId }
+      });
+      if (maxAttempts > 0 && attemptCount >= maxAttempts) {
+        const limitError = new Error(`Bạn đã hết ${maxAttempts} lượt làm bài kiểm tra này`);
+        limitError.status = 403;
+        throw limitError;
+      }
+
       let topicId = quiz.TopicID || quiz.Lessons?.LessonTopics[0]?.TopicID;
 
       if (!topicId) {
@@ -1834,7 +1896,17 @@ const submitStudentQuiz = async (req, res) => {
       });
 
       return attempt;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    let result;
+    for (let retry = 0; retry < 3; retry += 1) {
+      try {
+        result = await createQuizAttempt();
+        break;
+      } catch (transactionError) {
+        if (transactionError.code !== 'P2034' || retry === 2) throw transactionError;
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -1853,6 +1925,9 @@ const submitStudentQuiz = async (req, res) => {
       }
     });
   } catch (error) {
+    if (error.status === 403) {
+      return res.status(403).json({ success: false, message: error.message });
+    }
     console.error('Lỗi nộp bài kiểm tra học viên:', error);
     res.status(500).json({ success: false, message: 'Lỗi server' });
   }
@@ -2020,13 +2095,37 @@ const getStudentQuizResultDetail = async (req, res) => {
           totalScore: Number(attempt.TotalScore),
           maxScore: Number(attempt.Exercises.MaxScore) || 10,
           instructorFeedback: attempt.InstructorFeedback || '',
-          submissions: attempt.Submissions.map((submission) => ({
-            question: submission.TestQuestions.Content,
-            codeSubmitted: submission.CodeSubmitted,
-            isCorrect: submission.IsCorrect,
-            scoreEarned: Number(submission.ScoreEarned),
-            points: Number(submission.TestQuestions.Points)
-          }))
+          submissions: attempt.Submissions.map((submission) => {
+            let code = submission.CodeSubmitted;
+            let savedTestCases = [];
+
+            if (typeof code === 'string') {
+              try {
+                const parsed = JSON.parse(code);
+                if (parsed && typeof parsed === 'object' && typeof parsed.answer === 'string') {
+                  code = parsed.answer;
+                  savedTestCases = Array.isArray(parsed.testCases) ? parsed.testCases : [];
+                }
+              } catch (error) {
+                if (!(error instanceof SyntaxError)) throw error;
+              }
+            }
+
+            return {
+              question: submission.TestQuestions.Content,
+              codeSubmitted: code,
+              isCorrect: submission.IsCorrect,
+              scoreEarned: Number(submission.ScoreEarned),
+              points: Number(submission.TestQuestions.Points),
+              testCases: savedTestCases.map((testCase) => ({
+                input: typeof testCase?.input === 'string' ? testCase.input : '',
+                expected: typeof testCase?.expected === 'string' ? testCase.expected : '',
+                status: typeof testCase?.status === 'string' ? testCase.status : '',
+                actual: typeof testCase?.actual === 'string' ? testCase.actual : '',
+                passed: testCase?.passed === true
+              }))
+            };
+          })
         }
       });
     }
@@ -2238,7 +2337,7 @@ const submitExercise = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Lỗi xác thực: Không tìm thấy ID học viên.' });
     }
 
-    const { exerciseId, courseId, code, isPassed } = req.body;
+    const { exerciseId, courseId, code, isPassed, testCases: submittedTestCases } = req.body;
 
     if (
       !Number.isSafeInteger(Number(exerciseId)) ||
@@ -2254,6 +2353,19 @@ const submitExercise = async (req, res) => {
 
     const exIdInt = parseInt(exerciseId);
     const cIdInt = parseInt(courseId);
+
+    const testCases = (Array.isArray(submittedTestCases) ? submittedTestCases : []).map((testCase) => {
+      const status = ['Pass', 'Fail', 'Error'].includes(testCase?.status)
+        ? testCase.status
+        : testCase?.passed === true ? 'Pass' : 'Fail';
+      return {
+        input: typeof testCase?.input === 'string' ? testCase.input : '',
+        expected: typeof testCase?.expected === 'string' ? testCase.expected : '',
+        status,
+        actual: typeof testCase?.actual === 'string' ? testCase.actual : '',
+        passed: status === 'Pass'
+      };
+    });
 
     // 2. LẤY THÔNG TIN BÀI TẬP VÀ XỬ LÝ KHÓA NGOẠI (TOPIC_ID)
     const exercise = await prisma.exercises.findUnique({
@@ -2367,7 +2479,7 @@ const submitExercise = async (req, res) => {
         data: {
           AttemptID: attempt.AttemptID,
           QuestionID: firstQuestion.QuestionID,
-          CodeSubmitted: code,
+          CodeSubmitted: JSON.stringify({ answer: code, code, testCases }),
           IsCorrect: isPassed,
           ScoreEarned: scoreEarned
         }
